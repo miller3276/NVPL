@@ -1,9 +1,11 @@
 
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import CompetitionTeamOfWeek from '@/components/CompetitionTeamOfWeek'
 
 type Competition = {
   id: string
@@ -49,6 +51,8 @@ type Standing = {
   wins: number
   draws: number
   losses: number
+  goals_for: number
+  goals_against: number
   goal_difference: number
   points: number
 }
@@ -82,6 +86,13 @@ type CompetitionRule = {
   display_order: number
 }
 
+type Tab =
+  | 'overview'
+  | 'rules'
+  | 'fixtures'
+  | 'standings'
+  | 'totw'
+
 function CompetitionPageContent() {
   const params = useParams()
   const id = params.id as string
@@ -99,7 +110,8 @@ function CompetitionPageContent() {
   const [fixtureTeams, setFixtureTeams] = useState<Team[]>([])
 
   const [rules, setRules] = useState<CompetitionRule[]>([])
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState<Tab>('overview')
+
   const [ruleTitle, setRuleTitle] = useState('')
   const [ruleContent, setRuleContent] = useState('')
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
@@ -108,179 +120,207 @@ function CompetitionPageContent() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [selectedTeam, setSelectedTeam] = useState('')
   const [selectedPlayer, setSelectedPlayer] = useState('')
+
+  const [fixtureFilter, setFixtureFilter] = useState('all')
+  const [standingsView, setStandingsView] = useState('table')
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
-  useEffect(() => {
-    if (id) loadPage()
-  }, [id])
+  const loadPage = useCallback(async () => {
+    if (!id) return
 
-  async function loadPage() {
     setLoading(true)
     setMessage('')
 
-    const { data: authData } = await supabase.auth.getUser()
-    const user = authData.user
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const user = authData.user
 
-    setUserId(user?.id || '')
+      setUserId(user?.id || '')
 
-    const { data: competitionData, error: competitionError } = await supabase
-      .from('competitions')
-      .select('id, name, region, season, division, description, status, start_date, end_date, registrations_open, image_url')
-      .eq('id', id)
-      .maybeSingle()
-
-    if (competitionError || !competitionData) {
-      setCompetition(null)
-      setLoading(false)
-      return
-    }
-
-    setCompetition(competitionData as Competition)
-
-    if (user) {
-      const { data: adminData } = await supabase.rpc('nvpl_can_manage_competitions')
-      setIsAdmin(adminData === true)
-
-      const { data: staffData } = await supabase
-        .from('club_staff')
-        .select('team_id, role')
-        .eq('user_id', user.id)
-
-      const managedIds = (staffData || [])
-        .filter((staff: { team_id: string; role: string }) =>
-          ['manager', 'owner', 'admin', 'club_manager'].includes(
-            (staff.role || '').toLowerCase()
+      const { data: competitionData, error: competitionError } =
+        await supabase
+          .from('competitions')
+          .select(
+            'id, name, region, season, division, description, status, start_date, end_date, registrations_open, image_url'
           )
+          .eq('id', id)
+          .maybeSingle()
+
+      if (competitionError || !competitionData) {
+        setCompetition(null)
+        setLoading(false)
+        return
+      }
+
+      setCompetition(competitionData as Competition)
+
+      if (user) {
+        const { data: adminData } = await supabase.rpc(
+          'nvpl_can_manage_competitions'
         )
-        .map((staff: { team_id: string }) => staff.team_id)
 
-      if (managedIds.length) {
-        const { data: myTeamData } = await supabase
-          .from('teams')
-          .select('id, name, abbreviation, badge_url')
-          .in('id', managedIds)
+        setIsAdmin(adminData === true)
 
-        setMyTeams((myTeamData || []) as Team[])
+        const { data: staffData } = await supabase
+          .from('club_staff')
+          .select('team_id, role')
+          .eq('user_id', user.id)
+
+        const managedIds = (staffData || [])
+          .filter((staff: { team_id: string; role: string }) =>
+            ['manager', 'owner', 'admin', 'club_manager'].includes(
+              (staff.role || '').toLowerCase()
+            )
+          )
+          .map((staff: { team_id: string }) => staff.team_id)
+
+        if (managedIds.length) {
+          const { data: myTeamData } = await supabase
+            .from('teams')
+            .select('id, name, abbreviation, badge_url')
+            .in('id', managedIds)
+            .order('name')
+
+          setMyTeams((myTeamData || []) as Team[])
+        } else {
+          setMyTeams([])
+        }
       } else {
+        setIsAdmin(false)
         setMyTeams([])
       }
-    } else {
-      setIsAdmin(false)
-      setMyTeams([])
-    }
 
-    const { data: ruleData } = await supabase
-      .from('nvpl_competition_rules')
-      .select('id, competition_id, title, content, display_order')
-      .eq('competition_id', id)
-      .order('display_order', { ascending: true })
-      .order('created_at', { ascending: true })
+      // Competition rules
+      const { data: ruleData } = await supabase
+        .from('nvpl_competition_rules')
+        .select('id, competition_id, title, content, display_order')
+        .eq('competition_id', id)
+        .order('display_order', { ascending: true })
 
-    setRules((ruleData || []) as CompetitionRule[])
+      setRules((ruleData || []) as CompetitionRule[])
 
-    const { data: teamRegistrations } = await supabase
-      .from('competition_team_registrations')
-      .select('team_id')
-      .eq('competition_id', id)
-      .eq('status', 'registered')
-
-    const teamIds = (teamRegistrations || []).map(
-      (registration: { team_id: string }) => registration.team_id
-    )
-
-    if (teamIds.length) {
-      const { data: teamData } = await supabase
-        .from('teams')
-        .select('id, name, abbreviation, badge_url')
-        .in('id', teamIds)
-        .order('name')
-
-      setRegisteredTeams((teamData || []) as Team[])
-    } else {
-      setRegisteredTeams([])
-    }
-
-    if (user) {
-      const { data: registrationData } = await supabase
-        .from('competition_registrations')
-        .select('id, team_id, player_id, status')
+      // Registered teams
+      const { data: teamRegistrations } = await supabase
+        .from('competition_team_registrations')
+        .select('team_id')
         .eq('competition_id', id)
         .eq('status', 'registered')
 
-      const rows = (registrationData || []) as Registration[]
-      setRegistrations(rows)
+      const teamIds = (teamRegistrations || []).map(
+        (registration: { team_id: string }) => registration.team_id
+      )
 
-      const playerIds = [...new Set(rows.map(row => row.player_id))]
+      if (teamIds.length) {
+        const { data: teamData } = await supabase
+          .from('teams')
+          .select('id, name, abbreviation, badge_url')
+          .in('id', teamIds)
+          .order('name')
 
-      if (playerIds.length) {
-        const { data: profileData } = await supabase
-          .from('player_profiles')
-          .select('id, username, gamertag, position, avatar_url')
-          .in('id', playerIds)
-
-        setProfiles((profileData || []) as Player[])
+        setRegisteredTeams((teamData || []) as Team[])
       } else {
+        setRegisteredTeams([])
+      }
+
+      // Player registrations
+      if (user) {
+        const { data: registrationData } = await supabase
+          .from('competition_registrations')
+          .select('id, team_id, player_id, status')
+          .eq('competition_id', id)
+          .eq('status', 'registered')
+
+        const rows = (registrationData || []) as Registration[]
+        setRegistrations(rows)
+
+        const playerIds = [...new Set(rows.map(row => row.player_id))]
+
+        if (playerIds.length) {
+          const { data: profileData } = await supabase
+            .from('player_profiles')
+            .select('id, username, gamertag, position, avatar_url')
+            .in('id', playerIds)
+
+          setProfiles((profileData || []) as Player[])
+        } else {
+          setProfiles([])
+        }
+      } else {
+        setRegistrations([])
         setProfiles([])
       }
-    } else {
-      setRegistrations([])
-      setProfiles([])
+
+      // Full standings
+      const { data: standingData } = await supabase
+        .from('nvpl_league_standings')
+        .select(
+          'team_id, team_name, abbreviation, played, wins, draws, losses, goals_for, goals_against, goal_difference, points'
+        )
+        .eq('competition_id', id)
+        .order('points', { ascending: false })
+        .order('goal_difference', { ascending: false })
+        .order('goals_for', { ascending: false })
+
+      setStandings((standingData || []) as Standing[])
+
+      // All fixtures
+      const { data: fixtureData } = await supabase
+        .from('nvpl_fixtures')
+        .select(
+          'id, home_team_id, away_team_id, matchweek, kickoff_at, status, home_score, away_score'
+        )
+        .eq('competition_id', id)
+        .order('kickoff_at', { ascending: true })
+
+      const fixtureRows = (fixtureData || []) as Fixture[]
+      setFixtures(fixtureRows)
+
+      const fixtureTeamIds = [
+        ...new Set(
+          fixtureRows.flatMap(fixture => [
+            fixture.home_team_id,
+            fixture.away_team_id
+          ])
+        )
+      ]
+
+      if (fixtureTeamIds.length) {
+        const { data: fixtureTeamData } = await supabase
+          .from('teams')
+          .select('id, name, abbreviation, badge_url')
+          .in('id', fixtureTeamIds)
+
+        setFixtureTeams((fixtureTeamData || []) as Team[])
+      } else {
+        setFixtureTeams([])
+      }
+
+      // Top scorers
+      const { data: scorerData } = await supabase
+        .from('nvpl_competition_player_statistics')
+        .select(
+          'player_id, username, gamertag, team_name, goals, assists, appearances'
+        )
+        .eq('competition_id', id)
+        .order('goals', { ascending: false })
+        .order('assists', { ascending: false })
+        .limit(10)
+
+      setTopScorers((scorerData || []) as TopScorer[])
+    } catch (error) {
+      console.error(error)
+      setMessage('Something went wrong while loading this competition.')
     }
-
-    const { data: standingData } = await supabase
-      .from('nvpl_league_standings')
-      .select('team_id, team_name, abbreviation, played, wins, draws, losses, goal_difference, points')
-      .eq('competition_id', id)
-      .order('points', { ascending: false })
-      .order('goal_difference', { ascending: false })
-      .limit(5)
-
-    setStandings((standingData || []) as Standing[])
-
-    const { data: fixtureData } = await supabase
-      .from('nvpl_fixtures')
-      .select('id, home_team_id, away_team_id, matchweek, kickoff_at, status, home_score, away_score')
-      .eq('competition_id', id)
-      .order('kickoff_at', { ascending: false })
-      .limit(20)
-
-    const fixtureRows = (fixtureData || []) as Fixture[]
-    setFixtures(fixtureRows)
-
-    const fixtureTeamIds = [
-      ...new Set(
-        fixtureRows.flatMap(fixture => [
-          fixture.home_team_id,
-          fixture.away_team_id
-        ])
-      )
-    ]
-
-    if (fixtureTeamIds.length) {
-      const { data: fixtureTeamData } = await supabase
-        .from('teams')
-        .select('id, name, abbreviation, badge_url')
-        .in('id', fixtureTeamIds)
-
-      setFixtureTeams((fixtureTeamData || []) as Team[])
-    } else {
-      setFixtureTeams([])
-    }
-
-    const { data: scorerData } = await supabase
-      .from('nvpl_competition_player_statistics')
-      .select('player_id, username, gamertag, team_name, goals, assists, appearances')
-      .eq('competition_id', id)
-      .order('goals', { ascending: false })
-      .order('assists', { ascending: false })
-      .limit(5)
-
-    setTopScorers((scorerData || []) as TopScorer[])
 
     setLoading(false)
-  }
+  }, [id])
+
+  useEffect(() => {
+    loadPage()
+  }, [loadPage])
 
   async function saveRule() {
     if (!competition || !ruleTitle.trim() || !ruleContent.trim()) {
@@ -524,6 +564,14 @@ function CompetitionPageContent() {
     )
   }
 
+  function teamBadge(teamId: string) {
+    return (
+      registeredTeams.find(team => team.id === teamId)?.badge_url ||
+      fixtureTeams.find(team => team.id === teamId)?.badge_url ||
+      null
+    )
+  }
+
   function playerName(playerId: string) {
     const player = profiles.find(profile => profile.id === playerId)
     return player?.username || player?.gamertag || 'Player'
@@ -543,48 +591,45 @@ function CompetitionPageContent() {
     return new Date(date).toLocaleString('en-AU', {
       day: 'numeric',
       month: 'short',
+      year: 'numeric',
       hour: 'numeric',
       minute: '2-digit'
     })
   }
 
-  const completedFixtures = fixtures.filter(
-    fixture => ['completed', 'finished', 'played'].includes(
+  function isCompleted(fixture: Fixture) {
+    return ['completed', 'finished', 'played'].includes(
       (fixture.status || '').toLowerCase()
     )
-  ).slice(0, 5)
+  }
+
+  function fixtureStatus(fixture: Fixture) {
+    if (isCompleted(fixture)) return 'Completed'
+
+    if (new Date(fixture.kickoff_at).getTime() < Date.now()) {
+      return 'Awaiting result'
+    }
+
+    return 'Upcoming'
+  }
+
+  const completedFixtures = fixtures.filter(isCompleted)
 
   const upcomingFixtures = fixtures
-    .filter(fixture =>
-      new Date(fixture.kickoff_at).getTime() >= Date.now() &&
-      !['completed', 'finished', 'played'].includes(
-        (fixture.status || '').toLowerCase()
-      )
-    )
+    .filter(fixture => !isCompleted(fixture))
     .sort(
       (a, b) =>
         new Date(a.kickoff_at).getTime() -
         new Date(b.kickoff_at).getTime()
     )
-    .slice(0, 5)
 
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-gray-950 text-white p-8">
-        Loading competition...
-      </main>
-    )
-  }
+  const filteredFixtures = fixtures.filter(fixture => {
+    if (fixtureFilter === 'completed') return isCompleted(fixture)
+    if (fixtureFilter === 'upcoming') return !isCompleted(fixture)
+    return true
+  })
 
-  if (!competition) {
-    return (
-      <main className="min-h-screen bg-gray-950 text-white p-8">
-        Competition not found.
-      </main>
-    )
-  }
-
-  const tabs = [
+  const tabs: { id: Tab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'rules', label: 'Rules' },
     { id: 'fixtures', label: 'Fixtures & Results' },
@@ -592,14 +637,56 @@ function CompetitionPageContent() {
     { id: 'totw', label: 'Team of the Week' }
   ]
 
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-gray-950 text-white p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="animate-pulse space-y-5">
+            <div className="h-5 w-40 bg-gray-800 rounded" />
+            <div className="h-64 bg-gray-900 rounded-2xl" />
+            <div className="h-12 bg-gray-900 rounded-xl" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map(item => (
+                <div key={item} className="h-24 bg-gray-900 rounded-xl" />
+              ))}
+            </div>
+          </div>
+          <p className="text-gray-400 mt-6">Loading competition...</p>
+        </div>
+      </main>
+    )
+  }
+
+  if (!competition) {
+    return (
+      <main className="min-h-screen bg-gray-950 text-white p-8">
+        <div className="max-w-7xl mx-auto">
+          <Link href="/competitions" className="text-blue-400 hover:underline">
+            ← All competitions
+          </Link>
+          <div className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
+            <h1 className="text-3xl font-black">Competition not found</h1>
+            <p className="text-gray-400 mt-3">
+              This competition may have been removed or the link is incorrect.
+            </p>
+          </div>
+        </div>
+      </main>
+    )
+  }
+
   return (
-    <main className="min-h-screen bg-gray-950 text-white p-6">
+    <main className="min-h-screen bg-gray-950 text-white p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
 
-        <a href="/competitions" className="text-blue-400 hover:underline">
+        <Link
+          href="/competitions"
+          className="text-blue-400 hover:text-blue-300 hover:underline text-sm"
+        >
           ← All competitions
-        </a>
+        </Link>
 
+        {/* Competition header */}
         <section
           className="relative overflow-hidden bg-gray-900 border border-gray-800 rounded-2xl mt-6"
           style={
@@ -612,7 +699,7 @@ function CompetitionPageContent() {
               : undefined
           }
         >
-          <div className="p-8 md:p-12">
+          <div className="p-7 md:p-12">
             <div className="flex flex-wrap justify-between gap-4">
               <span className="text-blue-400 font-bold uppercase tracking-widest text-sm">
                 {competition.region}
@@ -632,7 +719,7 @@ function CompetitionPageContent() {
             </p>
 
             {competition.description && (
-              <p className="text-gray-300 mt-5 max-w-3xl whitespace-pre-wrap">
+              <p className="text-gray-300 mt-5 max-w-3xl whitespace-pre-wrap leading-7">
                 {competition.description}
               </p>
             )}
@@ -646,17 +733,20 @@ function CompetitionPageContent() {
                 Ends: {formatDate(competition.end_date)}
               </span>
 
-              <span className={`px-4 py-2 rounded-lg text-sm font-semibold ${
-                competition.registrations_open
-                  ? 'bg-green-900 text-green-300'
-                  : 'bg-red-900 text-red-300'
-              }`}>
+              <span
+                className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                  competition.registrations_open
+                    ? 'bg-green-900 text-green-300'
+                    : 'bg-red-900 text-red-300'
+                }`}
+              >
                 Registrations {competition.registrations_open ? 'Open' : 'Closed'}
               </span>
             </div>
           </div>
         </section>
 
+        {/* Navigation */}
         <div className="flex gap-2 overflow-x-auto mt-8 border-b border-gray-800 pb-3">
           {tabs.map(tab => (
             <button
@@ -665,7 +755,7 @@ function CompetitionPageContent() {
                 setActiveTab(tab.id)
                 setMessage('')
               }}
-              className={`px-5 py-3 rounded-lg font-semibold whitespace-nowrap ${
+              className={`px-5 py-3 rounded-lg font-semibold whitespace-nowrap transition ${
                 activeTab === tab.id
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-900 text-gray-400 hover:text-white'
@@ -682,6 +772,7 @@ function CompetitionPageContent() {
           </div>
         )}
 
+        {/* RULES */}
         {activeTab === 'rules' && (
           <section className="mt-8">
             <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
@@ -769,7 +860,7 @@ function CompetitionPageContent() {
                     className="bg-gray-900 border border-gray-800 rounded-xl p-6"
                   >
                     <div className="flex flex-wrap justify-between items-start gap-4">
-                      <div className="flex gap-4">
+                      <div className="flex gap-4 flex-1">
                         <span className="w-9 h-9 shrink-0 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center font-bold">
                           {index + 1}
                         </span>
@@ -806,6 +897,7 @@ function CompetitionPageContent() {
           </section>
         )}
 
+        {/* OVERVIEW */}
         {activeTab === 'overview' && (
           <>
             <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
@@ -942,9 +1034,16 @@ function CompetitionPageContent() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
                   {registeredTeams.map(team => (
-                    <div key={team.id} className="bg-gray-800 border border-gray-700 rounded-xl p-4 flex items-center gap-4">
+                    <div
+                      key={team.id}
+                      className="bg-gray-800 border border-gray-700 rounded-xl p-4 flex items-center gap-4"
+                    >
                       {team.badge_url ? (
-                        <img src={team.badge_url} alt="" className="w-12 h-12 object-contain" />
+                        <img
+                          src={team.badge_url}
+                          alt={`${team.name} badge`}
+                          className="w-12 h-12 object-contain"
+                        />
                       ) : (
                         <div className="w-12 h-12 bg-gray-700 rounded-lg flex items-center justify-center font-bold">
                           {team.abbreviation || team.name.slice(0, 2)}
@@ -962,12 +1061,21 @@ function CompetitionPageContent() {
 
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold">Upcoming fixtures</h2>
+                <div className="flex justify-between items-center gap-3">
+                  <h2 className="text-xl font-bold">Upcoming fixtures</h2>
+                  <button
+                    onClick={() => setActiveTab('fixtures')}
+                    className="text-blue-400 text-sm hover:underline"
+                  >
+                    View all
+                  </button>
+                </div>
+
                 {upcomingFixtures.length === 0 ? (
                   <p className="text-gray-400 mt-5">No upcoming fixtures have been scheduled.</p>
                 ) : (
                   <div className="space-y-3 mt-5">
-                    {upcomingFixtures.map(fixture => (
+                    {upcomingFixtures.slice(0, 5).map(fixture => (
                       <div key={fixture.id} className="bg-gray-800 rounded-lg p-4">
                         <p className="text-xs text-blue-400 mb-3">
                           {fixture.matchweek ? `Matchweek ${fixture.matchweek}` : 'Upcoming match'}
@@ -985,19 +1093,30 @@ function CompetitionPageContent() {
               </div>
 
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold">Recent results</h2>
+                <div className="flex justify-between items-center gap-3">
+                  <h2 className="text-xl font-bold">Recent results</h2>
+                  <button
+                    onClick={() => setActiveTab('fixtures')}
+                    className="text-blue-400 text-sm hover:underline"
+                  >
+                    View all
+                  </button>
+                </div>
+
                 {completedFixtures.length === 0 ? (
                   <p className="text-gray-400 mt-5">No completed matches yet.</p>
                 ) : (
                   <div className="space-y-3 mt-5">
-                    {completedFixtures.map(fixture => (
+                    {completedFixtures.slice(0, 5).map(fixture => (
                       <div key={fixture.id} className="bg-gray-800 rounded-lg p-4">
                         <p className="text-xs text-gray-400 mb-3">
                           {fixture.matchweek ? `Matchweek ${fixture.matchweek}` : 'Final result'}
                         </p>
                         <div className="flex justify-between items-center gap-3">
                           <span className="font-semibold text-sm">{teamName(fixture.home_team_id)}</span>
-                          <span className="text-xl font-black">{fixture.home_score ?? 0} - {fixture.away_score ?? 0}</span>
+                          <span className="text-xl font-black">
+                            {fixture.home_score ?? 0} - {fixture.away_score ?? 0}
+                          </span>
                           <span className="font-semibold text-sm text-right">{teamName(fixture.away_team_id)}</span>
                         </div>
                       </div>
@@ -1010,10 +1129,18 @@ function CompetitionPageContent() {
             <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
               <div className="flex justify-between items-center gap-3">
                 <h2 className="text-xl font-bold">League standings</h2>
-                <span className="text-blue-400 text-sm">Top 5</span>
+                <button
+                  onClick={() => setActiveTab('standings')}
+                  className="text-blue-400 text-sm hover:underline"
+                >
+                  Full table
+                </button>
               </div>
+
               {standings.length === 0 ? (
-                <p className="text-gray-400 mt-5">Standings will appear once the competition table has been populated.</p>
+                <p className="text-gray-400 mt-5">
+                  Standings will appear once the competition table has been populated.
+                </p>
               ) : (
                 <div className="overflow-x-auto mt-5">
                   <table className="w-full text-sm text-left">
@@ -1030,7 +1157,7 @@ function CompetitionPageContent() {
                       </tr>
                     </thead>
                     <tbody>
-                      {standings.map((standing, index) => (
+                      {standings.slice(0, 5).map((standing, index) => (
                         <tr key={standing.team_id} className="border-b border-gray-800">
                           <td className="py-3 px-2 font-bold">{index + 1}</td>
                           <td className="py-3 px-2 font-semibold">{standing.team_name}</td>
@@ -1038,7 +1165,9 @@ function CompetitionPageContent() {
                           <td className="py-3 px-2">{standing.wins}</td>
                           <td className="py-3 px-2">{standing.draws}</td>
                           <td className="py-3 px-2">{standing.losses}</td>
-                          <td className="py-3 px-2">{standing.goal_difference > 0 ? '+' : ''}{standing.goal_difference}</td>
+                          <td className="py-3 px-2">
+                            {standing.goal_difference > 0 ? '+' : ''}{standing.goal_difference}
+                          </td>
                           <td className="py-3 px-2 font-black text-blue-400">{standing.points}</td>
                         </tr>
                       ))}
@@ -1049,18 +1178,31 @@ function CompetitionPageContent() {
             </section>
 
             <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
-              <h2 className="text-xl font-bold">Top scorers</h2>
+              <div className="flex justify-between items-center gap-3">
+                <h2 className="text-xl font-bold">Top scorers</h2>
+              </div>
+
               {topScorers.length === 0 ? (
-                <p className="text-gray-400 mt-5">Player statistics will appear once match statistics are recorded.</p>
+                <p className="text-gray-400 mt-5">
+                  Player statistics will appear once match statistics are recorded.
+                </p>
               ) : (
                 <div className="space-y-3 mt-5">
                   {topScorers.map((player, index) => (
-                    <div key={player.player_id} className="bg-gray-800 rounded-lg p-4 flex items-center justify-between gap-4">
+                    <div
+                      key={player.player_id}
+                      className="bg-gray-800 rounded-lg p-4 flex items-center justify-between gap-4"
+                    >
                       <div className="flex items-center gap-4">
                         <span className="text-gray-400 font-bold">#{index + 1}</span>
                         <div>
-                          <p className="font-semibold">{player.username || player.gamertag || 'Player'}</p>
+                          <p className="font-semibold">
+                            {player.username || player.gamertag || 'Player'}
+                          </p>
                           <p className="text-gray-400 text-xs">{player.team_name || 'Club'}</p>
+                          <p className="text-gray-500 text-xs">
+                            {player.appearances} appearances
+                          </p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -1077,11 +1219,16 @@ function CompetitionPageContent() {
               <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h2 className="text-2xl font-bold">Competition rosters</h2>
                 {registrations.length === 0 ? (
-                  <p className="text-gray-400 mt-4">No player registrations are visible yet.</p>
+                  <p className="text-gray-400 mt-4">
+                    No player registrations are visible yet.
+                  </p>
                 ) : (
                   <div className="space-y-3 mt-5">
                     {registrations.map(registration => (
-                      <div key={registration.id} className="bg-gray-800 border border-gray-700 rounded-lg p-4 flex flex-wrap justify-between items-center gap-3">
+                      <div
+                        key={registration.id}
+                        className="bg-gray-800 border border-gray-700 rounded-lg p-4 flex flex-wrap justify-between items-center gap-3"
+                      >
                         <div>
                           <p className="font-semibold">{playerName(registration.player_id)}</p>
                           <p className="text-sm text-gray-400">{teamName(registration.team_id)}</p>
@@ -1104,31 +1251,291 @@ function CompetitionPageContent() {
           </>
         )}
 
+        {/* FIXTURES AND RESULTS */}
         {activeTab === 'fixtures' && (
-          <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-8">
-            <h2 className="text-2xl font-bold">Fixtures & Results</h2>
-            <p className="text-gray-400 mt-3">
-              The full fixture management system is coming next.
-            </p>
+          <section className="mt-8">
+            <div className="flex flex-wrap justify-between items-center gap-4">
+              <div>
+                <h2 className="text-3xl font-black">Fixtures & Results</h2>
+                <p className="text-gray-400 mt-2">
+                  Every scheduled match and recorded result.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <span className="bg-gray-900 border border-gray-800 px-3 py-2 rounded-lg text-sm">
+                  {fixtures.length} matches
+                </span>
+                <span className="bg-gray-900 border border-gray-800 px-3 py-2 rounded-lg text-sm">
+                  {completedFixtures.length} completed
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mt-6">
+              {[
+                { id: 'all', label: 'All matches' },
+                { id: 'upcoming', label: 'Upcoming' },
+                { id: 'completed', label: 'Completed' }
+              ].map(filter => (
+                <button
+                  key={filter.id}
+                  onClick={() => setFixtureFilter(filter.id)}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                    fixtureFilter === filter.id
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-900 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+
+            {filteredFixtures.length === 0 ? (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center mt-6">
+                <h3 className="text-xl font-bold">No fixtures found</h3>
+                <p className="text-gray-400 mt-2">
+                  Fixtures will appear here once they have been scheduled.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4 mt-6">
+                {filteredFixtures.map(fixture => {
+                  const homeBadge = teamBadge(fixture.home_team_id)
+                  const awayBadge = teamBadge(fixture.away_team_id)
+
+                  return (
+                    <article
+                      key={fixture.id}
+                      className="bg-gray-900 border border-gray-800 rounded-xl p-5 md:p-6"
+                    >
+                      <div className="flex flex-wrap justify-between gap-3 text-xs text-gray-400 mb-5">
+                        <span>
+                          {fixture.matchweek
+                            ? `MATCHWEEK ${fixture.matchweek}`
+                            : 'COMPETITION FIXTURE'}
+                        </span>
+                        <span
+                          className={
+                            isCompleted(fixture)
+                              ? 'text-green-400'
+                              : 'text-blue-400'
+                          }
+                        >
+                          {fixtureStatus(fixture)}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-center">
+                        <div className="flex flex-col md:flex-row items-center gap-3 min-w-0">
+                          {homeBadge ? (
+                            <img
+                              src={homeBadge}
+                              alt=""
+                              className="w-10 h-10 object-contain"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center font-bold">
+                              {teamName(fixture.home_team_id).slice(0, 2)}
+                            </div>
+                          )}
+                          <span className="font-bold text-center md:text-left text-sm md:text-base break-words">
+                            {teamName(fixture.home_team_id)}
+                          </span>
+                        </div>
+
+                        <div className="text-center min-w-16">
+                          {isCompleted(fixture) ? (
+                            <span className="text-2xl md:text-3xl font-black">
+                              {fixture.home_score ?? 0} - {fixture.away_score ?? 0}
+                            </span>
+                          ) : (
+                            <span className="text-gray-500 font-black text-xl">VS</span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col md:flex-row items-center justify-end gap-3 min-w-0">
+                          <span className="font-bold text-center md:text-right text-sm md:text-base break-words">
+                            {teamName(fixture.away_team_id)}
+                          </span>
+                          {awayBadge ? (
+                            <img
+                              src={awayBadge}
+                              alt=""
+                              className="w-10 h-10 object-contain"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center font-bold">
+                              {teamName(fixture.away_team_id).slice(0, 2)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-gray-800 mt-5 pt-4 flex flex-wrap justify-between gap-2 text-xs text-gray-400">
+                        <span>{formatKickoff(fixture.kickoff_at)}</span>
+                        <span className="capitalize">{fixture.status}</span>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            )}
           </section>
         )}
 
+        {/* STANDINGS */}
         {activeTab === 'standings' && (
-          <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-8">
-            <h2 className="text-2xl font-bold">Full standings</h2>
-            <p className="text-gray-400 mt-3">
-              The full standings page is coming next.
-            </p>
+          <section className="mt-8">
+            <div className="flex flex-wrap justify-between items-center gap-4">
+              <div>
+                <h2 className="text-3xl font-black">League standings</h2>
+                <p className="text-gray-400 mt-2">
+                  Current competition table and club performance.
+                </p>
+              </div>
+
+              <span className="bg-gray-900 border border-gray-800 px-4 py-2 rounded-lg text-sm">
+                {standings.length} clubs
+              </span>
+            </div>
+
+            {standings.length === 0 ? (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center mt-6">
+                <h3 className="text-xl font-bold">No standings available</h3>
+                <p className="text-gray-400 mt-2">
+                  The table will appear once match results have been recorded.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2 mt-6">
+                  <button
+                    onClick={() => setStandingsView('table')}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                      standingsView === 'table'
+                        ? 'bg-blue-600'
+                        : 'bg-gray-900 text-gray-400'
+                    }`}
+                  >
+                    Full table
+                  </button>
+                  <button
+                    onClick={() => setStandingsView('form')}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                      standingsView === 'form'
+                        ? 'bg-blue-600'
+                        : 'bg-gray-900 text-gray-400'
+                    }`}
+                  >
+                    Club records
+                  </button>
+                </div>
+
+                {standingsView === 'table' ? (
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto mt-5">
+                    <table className="w-full text-sm text-left min-w-[650px]">
+                      <thead className="text-gray-400 border-b border-gray-800 bg-gray-800/50">
+                        <tr>
+                          <th className="py-4 px-4">#</th>
+                          <th className="py-4 px-4">Club</th>
+                          <th className="py-4 px-3">P</th>
+                          <th className="py-4 px-3">W</th>
+                          <th className="py-4 px-3">D</th>
+                          <th className="py-4 px-3">L</th>
+                          <th className="py-4 px-3">GF</th>
+                          <th className="py-4 px-3">GA</th>
+                          <th className="py-4 px-3">GD</th>
+                          <th className="py-4 px-4">Pts</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {standings.map((standing, index) => (
+                          <tr
+                            key={standing.team_id}
+                            className="border-b border-gray-800 hover:bg-gray-800/50"
+                          >
+                            <td className="py-4 px-4 font-bold text-gray-400">
+                              {index + 1}
+                            </td>
+                            <td className="py-4 px-4 font-semibold">
+                              {standing.team_name}
+                            </td>
+                            <td className="py-4 px-3">{standing.played}</td>
+                            <td className="py-4 px-3">{standing.wins}</td>
+                            <td className="py-4 px-3">{standing.draws}</td>
+                            <td className="py-4 px-3">{standing.losses}</td>
+                            <td className="py-4 px-3">{standing.goals_for}</td>
+                            <td className="py-4 px-3">{standing.goals_against}</td>
+                            <td className="py-4 px-3">
+                              <span className={
+                                standing.goal_difference > 0
+                                  ? 'text-green-400'
+                                  : standing.goal_difference < 0
+                                    ? 'text-red-400'
+                                    : 'text-gray-400'
+                              }>
+                                {standing.goal_difference > 0 ? '+' : ''}
+                                {standing.goal_difference}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4 font-black text-blue-400 text-base">
+                              {standing.points}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+                    {standings.map((standing, index) => (
+                      <div
+                        key={standing.team_id}
+                        className="bg-gray-900 border border-gray-800 rounded-xl p-5"
+                      >
+                        <div className="flex justify-between items-center gap-3">
+                          <h3 className="font-bold">
+                            {index + 1}. {standing.team_name}
+                          </h3>
+                          <span className="text-blue-400 font-black">
+                            {standing.points} pts
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 mt-5 text-center">
+                          <div className="bg-gray-800 rounded-lg p-3">
+                            <p className="text-xl font-black">{standing.played}</p>
+                            <p className="text-xs text-gray-400">Played</p>
+                          </div>
+                          <div className="bg-gray-800 rounded-lg p-3">
+                            <p className="text-xl font-black text-green-400">{standing.wins}</p>
+                            <p className="text-xs text-gray-400">Wins</p>
+                          </div>
+                          <div className="bg-gray-800 rounded-lg p-3">
+                            <p className="text-xl font-black text-yellow-400">{standing.draws}</p>
+                            <p className="text-xs text-gray-400">Draws</p>
+                          </div>
+                          <div className="bg-gray-800 rounded-lg p-3">
+                            <p className="text-xl font-black text-red-400">{standing.losses}</p>
+                            <p className="text-xs text-gray-400">Losses</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </section>
         )}
 
+        {/* TEAM OF THE WEEK */}
         {activeTab === 'totw' && (
-          <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-8">
-            <h2 className="text-2xl font-bold">Team of the Week</h2>
-            <p className="text-gray-400 mt-3">
-              Team of the Week selection is coming next.
-            </p>
-          </section>
+          <CompetitionTeamOfWeek
+            competitionId={competition.id}
+            isAdmin={isAdmin}
+          />
         )}
 
       </div>
