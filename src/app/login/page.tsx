@@ -29,7 +29,7 @@ export default function LoginPage() {
         if (error) throw error
 
         if (data.session) {
-          router.replace('/dashboard')
+          router.replace('/')
           router.refresh()
         } else {
           setMessage('Account created! Check your email to confirm your account.')
@@ -42,9 +42,7 @@ export default function LoginPage() {
 
         if (error) throw error
 
-        setMessage('Login successful! Redirecting...')
-
-        router.replace('/dashboard')
+        router.replace('/')
         router.refresh()
       }
     } catch (error) {
@@ -82,7 +80,7 @@ export default function LoginPage() {
               type="email"
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={e => setEmail(e.target.value)}
               className="w-full rounded-lg border border-white/10 bg-[#080d18] p-3 outline-none focus:border-blue-500"
               placeholder="you@example.com"
             />
@@ -95,7 +93,7 @@ export default function LoginPage() {
               required
               minLength={6}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={e => setPassword(e.target.value)}
               className="w-full rounded-lg border border-white/10 bg-[#080d18] p-3 outline-none focus:border-blue-500"
               placeholder="Enter your password"
             />
@@ -115,9 +113,7 @@ export default function LoginPage() {
         </form>
 
         {message && (
-          <p className="mt-5 text-sm text-blue-300">
-            {message}
-          </p>
+          <p className="mt-5 text-sm text-blue-300">{message}</p>
         )}
 
         <button

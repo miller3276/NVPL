@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
 type Stats = {
@@ -27,15 +28,27 @@ const initialStats: Stats = {
   admins: 0,
 }
 
+const sections = [
+  { label: 'Competitions', href: '/admin/competitions' },
+  { label: 'Clubs', href: '/admin/clubs' },
+  { label: 'Players', href: '/admin/players' },
+  { label: 'Fixtures & Results', href: '/admin/fixtures' },
+  { label: 'Community', href: '/admin/community' },
+  { label: 'Moderation', href: '/admin/community' },
+  { label: 'Support', href: '/support' },
+  { label: 'Administrators', href: '/admin/permissions' },
+  { label: 'Settings', href: '/admin/management' },
+]
+
 const statItems = [
-  { key: 'competitions', label: 'Competitions', icon: '🏆' },
-  { key: 'clubs', label: 'Clubs', icon: '🛡️' },
-  { key: 'players', label: 'Players', icon: '👤' },
-  { key: 'fixtures', label: 'Fixtures', icon: '⚽' },
-  { key: 'posts', label: 'Community Posts', icon: '💬' },
-  { key: 'reports', label: 'Reports', icon: '🚩' },
-  { key: 'tickets', label: 'Support Tickets', icon: '🎫' },
-  { key: 'admins', label: 'Administrators', icon: '🔐' },
+  { key: 'competitions', label: 'Competitions', icon: '🏆', href: '/admin/competitions' },
+  { key: 'clubs', label: 'Clubs', icon: '🛡️', href: '/admin/clubs' },
+  { key: 'players', label: 'Players', icon: '👤', href: '/admin/players' },
+  { key: 'fixtures', label: 'Fixtures', icon: '⚽', href: '/admin/fixtures' },
+  { key: 'posts', label: 'Community Posts', icon: '💬', href: '/admin/community' },
+  { key: 'reports', label: 'Reports', icon: '🚩', href: '/admin/community' },
+  { key: 'tickets', label: 'Support Tickets', icon: '🎫', href: '/support' },
+  { key: 'admins', label: 'Administrators', icon: '🔐', href: '/admin/permissions' },
 ] as const
 
 export default function AdminPage() {
@@ -153,10 +166,6 @@ export default function AdminPage() {
     setRefreshing(false)
   }
 
-  async function handleRefresh() {
-    await loadStats()
-  }
-
   async function handleSignOut() {
     await supabase.auth.signOut()
     router.replace('/login')
@@ -197,47 +206,39 @@ export default function AdminPage() {
     <main className="min-h-screen bg-[#080b12] text-white">
       <div className="flex min-h-screen">
 
-        <aside className="hidden md:flex w-64 bg-[#0d121c] border-r border-white/10 p-6 flex-col">
-          <div className="mb-10">
+        <aside className="flex w-56 md:w-64 shrink-0 bg-[#0d121c] border-r border-white/10 p-3 md:p-6 flex-col">
+          <Link href="/admin" className="mb-10">
             <h1 className="text-2xl font-black tracking-wider">
               NVPL<span className="text-blue-500">.</span>
             </h1>
             <p className="text-xs text-gray-500 mt-1">
               Administration Centre
             </p>
-          </div>
+          </Link>
 
           <div className="text-xs uppercase tracking-widest text-gray-500 mb-3">
             Management
           </div>
 
-          <div className="space-y-2">
-            <div className="bg-blue-600/15 text-blue-400 rounded-xl px-4 py-3 font-semibold">
+          <nav className="space-y-2">
+            <Link
+              href="/admin"
+              className="block bg-blue-600/15 text-blue-400 rounded-xl px-3 py-3 font-semibold text-sm"
+            >
               Overview
-            </div>
+            </Link>
 
-            {[
-              'Competitions',
-              'Clubs',
-              'Players',
-              'Fixtures & Results',
-              'Community',
-              'Moderation',
-              'Support',
-              'Administrators',
-              'Settings',
-            ].map(item => (
-              <div
-                key={item}
-                className="px-4 py-3 rounded-xl text-gray-400 text-sm"
+            {sections.map(item => (
+              <Link
+                key={item.label}
+                href={item.href}
+                className="block px-3 py-3 rounded-xl text-gray-400 text-sm hover:bg-white/5 hover:text-white transition"
               >
-                {item}
-                <span className="float-right text-xs text-gray-600">
-                  Soon
-                </span>
-              </div>
+                {item.label}
+                <span className="float-right text-blue-400">→</span>
+              </Link>
             ))}
-          </div>
+          </nav>
 
           <div className="mt-auto border-t border-white/10 pt-5">
             <p className="text-xs text-gray-500 mb-1">Signed in as</p>
@@ -251,7 +252,7 @@ export default function AdminPage() {
           </div>
         </aside>
 
-        <section className="flex-1 min-w-0 p-5 md:p-10">
+        <section className="flex-1 min-w-0 p-4 md:p-10">
           <div className="flex flex-wrap justify-between items-center gap-4 mb-10">
             <div>
               <p className="text-blue-400 text-sm font-semibold mb-2">
@@ -266,7 +267,7 @@ export default function AdminPage() {
             </div>
 
             <button
-              onClick={handleRefresh}
+              onClick={() => loadStats()}
               disabled={refreshing}
               className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-5 py-3 rounded-xl font-semibold"
             >
@@ -302,21 +303,20 @@ export default function AdminPage() {
           <div className="mb-5">
             <h3 className="text-xl font-bold">Platform Statistics</h3>
             <p className="text-gray-500 text-sm mt-1">
-              Live counts from your Supabase database.
+              Select a section to manage it.
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             {statItems.map(item => (
-              <div
+              <Link
                 key={item.key}
-                className="bg-[#111722] border border-white/10 rounded-2xl p-5 hover:border-blue-500/40 transition"
+                href={item.href}
+                className="bg-[#111722] border border-white/10 rounded-2xl p-5 hover:border-blue-500/60 hover:bg-[#151e2c] transition block"
               >
                 <div className="flex justify-between items-center mb-5">
                   <span className="text-2xl">{item.icon}</span>
-                  <span className="text-xs text-gray-500 uppercase">
-                    Total
-                  </span>
+                  <span className="text-xs text-blue-400">OPEN →</span>
                 </div>
                 <div className="text-3xl font-black">
                   {stats[item.key].toLocaleString()}
@@ -324,7 +324,7 @@ export default function AdminPage() {
                 <p className="text-gray-400 text-sm mt-2">
                   {item.label}
                 </p>
-              </div>
+              </Link>
             ))}
           </div>
 
@@ -333,10 +333,8 @@ export default function AdminPage() {
               NVPL Administration
             </h3>
             <p className="text-gray-400 text-sm leading-6">
-              This is the foundation of the NVPL administration system.
-              Competition controls, club management, player management,
-              moderation, support and staff permissions will be connected
-              in the next development batches.
+              Use the navigation panel to access your existing management
+              sections and administer the NVPL platform.
             </p>
           </div>
 
