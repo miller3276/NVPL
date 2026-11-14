@@ -16,6 +16,7 @@ type Competition = {
   start_date: string | null
   end_date: string | null
   registrations_open: boolean
+  image_url: string | null
 }
 
 type Team = {
@@ -40,6 +41,39 @@ type Registration = {
   status: string
 }
 
+type Standing = {
+  team_id: string
+  team_name: string
+  abbreviation: string | null
+  played: number
+  wins: number
+  draws: number
+  losses: number
+  goal_difference: number
+  points: number
+}
+
+type Fixture = {
+  id: string
+  home_team_id: string
+  away_team_id: string
+  matchweek: number | null
+  kickoff_at: string
+  status: string
+  home_score: number | null
+  away_score: number | null
+}
+
+type TopScorer = {
+  player_id: string
+  username: string | null
+  gamertag: string | null
+  team_name: string | null
+  goals: number
+  assists: number
+  appearances: number
+}
+
 function CompetitionPageContent() {
   const params = useParams()
   const id = params.id as string
@@ -50,6 +84,11 @@ function CompetitionPageContent() {
   const [players, setPlayers] = useState<Player[]>([])
   const [registrations, setRegistrations] = useState<Registration[]>([])
   const [profiles, setProfiles] = useState<Player[]>([])
+
+  const [standings, setStandings] = useState<Standing[]>([])
+  const [fixtures, setFixtures] = useState<Fixture[]>([])
+  const [topScorers, setTopScorers] = useState<TopScorer[]>([])
+  const [fixtureTeams, setFixtureTeams] = useState<Team[]>([])
 
   const [userId, setUserId] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
@@ -74,7 +113,7 @@ function CompetitionPageContent() {
 
     const { data: competitionData, error: competitionError } = await supabase
       .from('competitions')
-      .select('id, name, region, season, division, description, status, start_date, end_date, registrations_open')
+      .select('id, name, region, season, division, description, status, start_date, end_date, registrations_open, image_url')
       .eq('id', id)
       .maybeSingle()
 
@@ -166,6 +205,59 @@ function CompetitionPageContent() {
       setRegistrations([])
       setProfiles([])
     }
+
+    // Load league standings
+    const { data: standingData } = await supabase
+      .from('nvpl_league_standings')
+      .select('team_id, team_name, abbreviation, played, wins, draws, losses, goal_difference, points')
+      .eq('competition_id', id)
+      .order('points', { ascending: false })
+      .order('goal_difference', { ascending: false })
+      .limit(5)
+
+    setStandings((standingData || []) as Standing[])
+
+    // Load fixtures and results
+    const { data: fixtureData } = await supabase
+      .from('nvpl_fixtures')
+      .select('id, home_team_id, away_team_id, matchweek, kickoff_at, status, home_score, away_score')
+      .eq('competition_id', id)
+      .order('kickoff_at', { ascending: false })
+      .limit(20)
+
+    const fixtureRows = (fixtureData || []) as Fixture[]
+    setFixtures(fixtureRows)
+
+    const fixtureTeamIds = [
+      ...new Set(
+        fixtureRows.flatMap(fixture => [
+          fixture.home_team_id,
+          fixture.away_team_id
+        ])
+      )
+    ]
+
+    if (fixtureTeamIds.length) {
+      const { data: fixtureTeamData } = await supabase
+        .from('teams')
+        .select('id, name, abbreviation, badge_url')
+        .in('id', fixtureTeamIds)
+
+      setFixtureTeams((fixtureTeamData || []) as Team[])
+    } else {
+      setFixtureTeams([])
+    }
+
+    // Load top scorers
+    const { data: scorerData } = await supabase
+      .from('nvpl_competition_player_statistics')
+      .select('player_id, username, gamertag, team_name, goals, assists, appearances')
+      .eq('competition_id', id)
+      .order('goals', { ascending: false })
+      .order('assists', { ascending: false })
+      .limit(5)
+
+    setTopScorers((scorerData || []) as TopScorer[])
 
     setLoading(false)
   }
@@ -315,13 +407,56 @@ function CompetitionPageContent() {
   }
 
   function teamName(teamId: string) {
-    return registeredTeams.find(team => team.id === teamId)?.name || 'Club'
+    return (
+      registeredTeams.find(team => team.id === teamId)?.name ||
+      fixtureTeams.find(team => team.id === teamId)?.name ||
+      'Club'
+    )
   }
 
   function playerName(playerId: string) {
     const player = profiles.find(profile => profile.id === playerId)
     return player?.username || player?.gamertag || 'Player'
   }
+
+  function formatDate(date: string | null) {
+    if (!date) return 'TBA'
+
+    return new Date(date).toLocaleDateString('en-AU', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    })
+  }
+
+  function formatKickoff(date: string) {
+    return new Date(date).toLocaleString('en-AU', {
+      day: 'numeric',
+      month: 'short',
+      hour: 'numeric',
+      minute: '2-digit'
+    })
+  }
+
+  const completedFixtures = fixtures.filter(
+    fixture => ['completed', 'finished', 'played'].includes(
+      (fixture.status || '').toLowerCase()
+    )
+  ).slice(0, 5)
+
+  const upcomingFixtures = fixtures
+    .filter(fixture =>
+      new Date(fixture.kickoff_at).getTime() >= Date.now() &&
+      !['completed', 'finished', 'played'].includes(
+        (fixture.status || '').toLowerCase()
+      )
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.kickoff_at).getTime() -
+        new Date(b.kickoff_at).getTime()
+    )
+    .slice(0, 5)
 
   if (loading) {
     return (
@@ -341,51 +476,88 @@ function CompetitionPageContent() {
 
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
+
         <a href="/competitions" className="text-blue-400 hover:underline">
           ← All competitions
         </a>
 
-        <section className="bg-gray-900 border border-gray-800 rounded-2xl p-8 mt-6">
-          <div className="flex flex-wrap justify-between gap-4">
-            <span className="text-blue-400 font-bold">
-              {competition.region}
-            </span>
-            <span className="text-sm text-gray-400 capitalize">
-              {competition.status}
-            </span>
-          </div>
+        {/* COMPETITION HEADER */}
+        <section
+          className="relative overflow-hidden bg-gray-900 border border-gray-800 rounded-2xl mt-6"
+          style={
+            competition.image_url
+              ? {
+                  backgroundImage: `linear-gradient(90deg, rgba(3,7,18,.97), rgba(3,7,18,.65)), url(${competition.image_url})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center'
+                }
+              : undefined
+          }
+        >
+          <div className="p-8 md:p-12">
+            <div className="flex flex-wrap justify-between gap-4">
+              <span className="text-blue-400 font-bold uppercase tracking-widest text-sm">
+                {competition.region}
+              </span>
 
-          <h1 className="text-4xl font-bold mt-4">
-            {competition.name}
-          </h1>
-
-          <p className="text-gray-400 mt-3">
-            {competition.season} · {competition.division}
-          </p>
-
-          {competition.description && (
-            <p className="text-gray-300 mt-6 whitespace-pre-wrap">
-              {competition.description}
-            </p>
-          )}
-
-          <div className="grid grid-cols-2 gap-4 mt-8">
-            <div className="bg-gray-800 rounded-lg p-4">
-              <p className="text-gray-400 text-sm">Start date</p>
-              <p className="font-semibold mt-1">
-                {competition.start_date || 'TBA'}
-              </p>
+              <span className="bg-gray-800 px-4 py-2 rounded-full text-sm capitalize">
+                {competition.status}
+              </span>
             </div>
 
-            <div className="bg-gray-800 rounded-lg p-4">
-              <p className="text-gray-400 text-sm">End date</p>
-              <p className="font-semibold mt-1">
-                {competition.end_date || 'TBA'}
+            <h1 className="text-4xl md:text-5xl font-black mt-6">
+              {competition.name}
+            </h1>
+
+            <p className="text-gray-300 mt-3 text-lg">
+              {competition.season} · {competition.division}
+            </p>
+
+            {competition.description && (
+              <p className="text-gray-300 mt-5 max-w-3xl whitespace-pre-wrap">
+                {competition.description}
               </p>
+            )}
+
+            <div className="flex flex-wrap gap-3 mt-8">
+              <span className="bg-gray-800/90 px-4 py-2 rounded-lg text-sm">
+                Starts: {formatDate(competition.start_date)}
+              </span>
+
+              <span className="bg-gray-800/90 px-4 py-2 rounded-lg text-sm">
+                Ends: {formatDate(competition.end_date)}
+              </span>
+
+              <span className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                competition.registrations_open
+                  ? 'bg-green-900 text-green-300'
+                  : 'bg-red-900 text-red-300'
+              }`}>
+                Registrations {competition.registrations_open ? 'Open' : 'Closed'}
+              </span>
             </div>
           </div>
         </section>
+
+        {/* OVERVIEW NAVIGATION */}
+        <div className="flex gap-2 overflow-x-auto mt-8 border-b border-gray-800 pb-3">
+          <span className="bg-blue-600 px-5 py-3 rounded-lg font-semibold whitespace-nowrap">
+            Overview
+          </span>
+          <span className="bg-gray-900 text-gray-500 px-5 py-3 rounded-lg whitespace-nowrap">
+            Rules
+          </span>
+          <span className="bg-gray-900 text-gray-500 px-5 py-3 rounded-lg whitespace-nowrap">
+            Fixtures & Results
+          </span>
+          <span className="bg-gray-900 text-gray-500 px-5 py-3 rounded-lg whitespace-nowrap">
+            Standings
+          </span>
+          <span className="bg-gray-900 text-gray-500 px-5 py-3 rounded-lg whitespace-nowrap">
+            Team of the Week
+          </span>
+        </div>
 
         {message && (
           <div className="mt-6 bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm">
@@ -393,9 +565,34 @@ function CompetitionPageContent() {
           </div>
         )}
 
+        {/* QUICK STATISTICS */}
+        <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <p className="text-gray-400 text-sm">Registered clubs</p>
+            <p className="text-3xl font-black mt-2">{registeredTeams.length}</p>
+          </div>
+
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <p className="text-gray-400 text-sm">Registered players</p>
+            <p className="text-3xl font-black mt-2">{registrations.length}</p>
+          </div>
+
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <p className="text-gray-400 text-sm">Matches played</p>
+            <p className="text-3xl font-black mt-2">{completedFixtures.length}</p>
+          </div>
+
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <p className="text-gray-400 text-sm">Competition status</p>
+            <p className="text-xl font-bold mt-3 capitalize">{competition.status}</p>
+          </div>
+        </section>
+
+        {/* REGISTRATION CONTROLS */}
         {isAdmin && (
           <section className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6">
             <h2 className="text-xl font-bold">Registration controls</h2>
+
             <p className="text-gray-400 text-sm mt-2">
               {competition.registrations_open
                 ? 'Registrations are currently open.'
@@ -420,9 +617,11 @@ function CompetitionPageContent() {
           </section>
         )}
 
+        {/* CLUB REGISTRATION */}
         {competition.registrations_open && myTeams.length > 0 && (
           <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
             <h2 className="text-2xl font-bold">Club registration</h2>
+
             <p className="text-gray-400 mt-2">
               Register your club for this competition.
             </p>
@@ -452,9 +651,11 @@ function CompetitionPageContent() {
           </section>
         )}
 
+        {/* PLAYER REGISTRATION */}
         {competition.registrations_open && myTeams.length > 0 && (
           <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
             <h2 className="text-2xl font-bold">Register players</h2>
+
             <p className="text-gray-400 mt-2">
               Select players from your club's active membership.
             </p>
@@ -502,8 +703,14 @@ function CompetitionPageContent() {
           </section>
         )}
 
+        {/* REGISTERED CLUBS */}
         <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <h2 className="text-2xl font-bold">Registered clubs</h2>
+          <div className="flex justify-between items-center gap-3">
+            <h2 className="text-2xl font-bold">Registered clubs</h2>
+            <span className="text-gray-400 text-sm">
+              {registeredTeams.length} clubs
+            </span>
+          </div>
 
           {registeredTeams.length === 0 ? (
             <p className="text-gray-400 mt-4">
@@ -538,6 +745,172 @@ function CompetitionPageContent() {
           )}
         </section>
 
+        {/* UPCOMING FIXTURES AND RECENT RESULTS */}
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <h2 className="text-xl font-bold">Upcoming fixtures</h2>
+
+            {upcomingFixtures.length === 0 ? (
+              <p className="text-gray-400 mt-5">
+                No upcoming fixtures have been scheduled.
+              </p>
+            ) : (
+              <div className="space-y-3 mt-5">
+                {upcomingFixtures.map(fixture => (
+                  <div key={fixture.id} className="bg-gray-800 rounded-lg p-4">
+                    <p className="text-xs text-blue-400 mb-3">
+                      {fixture.matchweek ? `Matchweek ${fixture.matchweek}` : 'Upcoming match'}
+                    </p>
+
+                    <div className="flex justify-between items-center gap-3">
+                      <span className="font-semibold text-sm">
+                        {teamName(fixture.home_team_id)}
+                      </span>
+                      <span className="text-gray-500 font-bold">VS</span>
+                      <span className="font-semibold text-sm text-right">
+                        {teamName(fixture.away_team_id)}
+                      </span>
+                    </div>
+
+                    <p className="text-gray-400 text-xs mt-3">
+                      {formatKickoff(fixture.kickoff_at)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <h2 className="text-xl font-bold">Recent results</h2>
+
+            {completedFixtures.length === 0 ? (
+              <p className="text-gray-400 mt-5">
+                No completed matches yet.
+              </p>
+            ) : (
+              <div className="space-y-3 mt-5">
+                {completedFixtures.map(fixture => (
+                  <div key={fixture.id} className="bg-gray-800 rounded-lg p-4">
+                    <p className="text-xs text-gray-400 mb-3">
+                      {fixture.matchweek ? `Matchweek ${fixture.matchweek}` : 'Final result'}
+                    </p>
+
+                    <div className="flex justify-between items-center gap-3">
+                      <span className="font-semibold text-sm">
+                        {teamName(fixture.home_team_id)}
+                      </span>
+
+                      <span className="text-xl font-black">
+                        {fixture.home_score ?? 0} - {fixture.away_score ?? 0}
+                      </span>
+
+                      <span className="font-semibold text-sm text-right">
+                        {teamName(fixture.away_team_id)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </section>
+
+        {/* STANDINGS PREVIEW */}
+        <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
+          <div className="flex justify-between items-center gap-3">
+            <h2 className="text-xl font-bold">League standings</h2>
+            <span className="text-blue-400 text-sm">Top 5</span>
+          </div>
+
+          {standings.length === 0 ? (
+            <p className="text-gray-400 mt-5">
+              Standings will appear once the competition table has been populated.
+            </p>
+          ) : (
+            <div className="overflow-x-auto mt-5">
+              <table className="w-full text-sm text-left">
+                <thead className="text-gray-400 border-b border-gray-700">
+                  <tr>
+                    <th className="py-3 px-2">#</th>
+                    <th className="py-3 px-2">Club</th>
+                    <th className="py-3 px-2">P</th>
+                    <th className="py-3 px-2">W</th>
+                    <th className="py-3 px-2">D</th>
+                    <th className="py-3 px-2">L</th>
+                    <th className="py-3 px-2">GD</th>
+                    <th className="py-3 px-2">Pts</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {standings.map((standing, index) => (
+                    <tr key={standing.team_id} className="border-b border-gray-800">
+                      <td className="py-3 px-2 font-bold">{index + 1}</td>
+                      <td className="py-3 px-2 font-semibold">
+                        {standing.team_name}
+                      </td>
+                      <td className="py-3 px-2">{standing.played}</td>
+                      <td className="py-3 px-2">{standing.wins}</td>
+                      <td className="py-3 px-2">{standing.draws}</td>
+                      <td className="py-3 px-2">{standing.losses}</td>
+                      <td className="py-3 px-2">{standing.goal_difference > 0 ? '+' : ''}{standing.goal_difference}</td>
+                      <td className="py-3 px-2 font-black text-blue-400">{standing.points}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* TOP SCORERS */}
+        <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
+          <h2 className="text-xl font-bold">Top scorers</h2>
+
+          {topScorers.length === 0 ? (
+            <p className="text-gray-400 mt-5">
+              Player statistics will appear once match statistics are recorded.
+            </p>
+          ) : (
+            <div className="space-y-3 mt-5">
+              {topScorers.map((player, index) => (
+                <div
+                  key={player.player_id}
+                  className="bg-gray-800 rounded-lg p-4 flex items-center justify-between gap-4"
+                >
+                  <div className="flex items-center gap-4">
+                    <span className="text-gray-400 font-bold">
+                      #{index + 1}
+                    </span>
+
+                    <div>
+                      <p className="font-semibold">
+                        {player.username || player.gamertag || 'Player'}
+                      </p>
+                      <p className="text-gray-400 text-xs">
+                        {player.team_name || 'Club'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="text-xl font-black text-blue-400">
+                      {player.goals}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      Goals · {player.assists} assists
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* COMPETITION ROSTERS */}
         {userId && (
           <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
             <h2 className="text-2xl font-bold">Competition rosters</h2>
@@ -577,6 +950,7 @@ function CompetitionPageContent() {
             )}
           </section>
         )}
+
       </div>
     </main>
   )
