@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import NVPLBadges from '@/components/NVPLBadges'
 
 type Team = {
   id: string
@@ -172,6 +173,10 @@ export default function ClubPage() {
             ))}
           </div>
         )}
+
+        <div className="mt-8">
+          <NVPLBadges teamId={team.id} />
+        </div>
 
         <a href="/directory" className="inline-block mt-8 text-blue-400 hover:underline">
           Player directory →

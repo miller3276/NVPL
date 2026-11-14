@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import NVPLBadges from '@/components/NVPLBadges'
 
 type Player = {
   id: string
@@ -293,6 +294,10 @@ function PlayerPageContent() {
               {player.is_ranked ? 'Ranked player' : 'Unranked player'}
             </p>
           </section>
+        </div>
+
+        <div className="mt-6">
+          <NVPLBadges playerId={player.id} />
         </div>
       </div>
     </main>
