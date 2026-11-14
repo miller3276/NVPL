@@ -18,7 +18,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#080b12] text-white">
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#080b12]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-5">
           <Link href="/" className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-600 text-2xl font-black italic">
               N
@@ -31,15 +31,27 @@ export default function Home() {
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-8 text-sm font-semibold text-gray-300 md:flex">
+          <nav className="flex flex-wrap items-center gap-5 text-xs font-semibold text-gray-300">
             <a href="#regions" className="hover:text-blue-400">REGIONS</a>
             <a href="#competitions" className="hover:text-blue-400">COMPETITIONS</a>
             <a href="#features" className="hover:text-blue-400">PLATFORM</a>
+            <Link href="/community" className="hover:text-blue-400">COMMUNITY</Link>
           </nav>
 
-          <a href="#regions" className="rounded-lg bg-blue-600 px-5 py-3 text-xs font-bold tracking-wider hover:bg-blue-500">
-            EXPLORE NVPL
-          </a>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="rounded-lg border border-white/20 px-4 py-3 text-xs font-bold hover:bg-white/10"
+            >
+              LOGIN
+            </Link>
+            <Link
+              href="/login"
+              className="rounded-lg bg-blue-600 px-5 py-3 text-xs font-bold tracking-wider hover:bg-blue-500"
+            >
+              JOIN NVPL
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -66,9 +78,9 @@ export default function Home() {
             </p>
 
             <div className="mt-10 flex flex-wrap gap-4">
-              <a href="#regions" className="rounded-lg bg-blue-600 px-7 py-4 text-sm font-bold tracking-wider hover:bg-blue-500">
-                EXPLORE REGIONS →
-              </a>
+              <Link href="/login" className="rounded-lg bg-blue-600 px-7 py-4 text-sm font-bold tracking-wider hover:bg-blue-500">
+                JOIN NVPL →
+              </Link>
               <a href="#features" className="rounded-lg border border-white/20 px-7 py-4 text-sm font-bold tracking-wider hover:bg-white/10">
                 DISCOVER NVPL
               </a>
@@ -147,6 +159,9 @@ export default function Home() {
               NVPL aims to bring the competitive Pro Clubs community
               together under one platform.
             </p>
+            <Link href="/login" className="mt-8 inline-block rounded-lg bg-blue-600 px-6 py-4 text-sm font-bold hover:bg-blue-500">
+              GET STARTED →
+            </Link>
           </div>
           <div className="rounded-2xl border border-blue-500/30 bg-blue-500/5 p-8">
             <div className="text-xs font-bold tracking-[3px] text-blue-400">THE NVPL STANDARD</div>
@@ -185,6 +200,9 @@ export default function Home() {
             A new home for competitive Pro Clubs. Built for teams,
             players and the community.
           </p>
+          <Link href="/login" className="mt-8 inline-block rounded-lg bg-white px-7 py-4 text-sm font-bold text-blue-700 hover:bg-blue-50">
+            JOIN THE PLATFORM →
+          </Link>
         </div>
       </section>
 
@@ -192,7 +210,11 @@ export default function Home() {
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-4 text-sm text-gray-500 md:flex-row">
           <div className="font-black tracking-widest text-white">NVPL</div>
           <div>National Virtual Pro League © 2026</div>
-          <div>ONE GAME. ONE COMMUNITY.</div>
+          <div className="flex gap-5">
+            <Link href="/login" className="hover:text-white">LOGIN</Link>
+            <Link href="/dashboard" className="hover:text-white">DASHBOARD</Link>
+            <Link href="/community" className="hover:text-white">COMMUNITY</Link>
+          </div>
         </div>
       </footer>
     </main>
