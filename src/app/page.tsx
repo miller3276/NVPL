@@ -1,83 +1,172 @@
-
 'use client'
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-const regions = [
-  { name: 'OCEANIA', code: 'OCE', divisions: 'Coming soon' },
-  { name: 'EUROPE', code: 'EU', divisions: 'Coming soon' },
-  { name: 'NORTH AMERICA', code: 'NA', divisions: 'Coming soon' },
+type Competition = {
+  id: string
+  name: string
+  region: string
+  division: string | null
+  season: string | null
+  status: string
+  start_date: string | null
+  description: string | null
+}
+
+type Post = {
+  id: string
+  author_id: string
+  author_username: string | null
+  author_avatar: string | null
+  content: string
+  image_url: string | null
+  pinned: boolean
+  featured: boolean
+  created_at: string
+}
+
+const menuLinks = [
+  { name: 'HOME', href: '/', icon: '⌂' },
+  { name: 'ALL LEAGUES', href: '/competitions', icon: '🏆' },
+  { name: 'COMPETITIONS', href: '/competitions', icon: '⚽' },
+  { name: 'RANKINGS', href: '/rankings', icon: '📊' },
+  { name: 'CLUBS', href: '/clubs', icon: '🛡️' },
+  { name: 'PLAYERS', href: '/players', icon: '👤' },
+  { name: 'FIXTURES', href: '/fixtures', icon: '📅' },
+  { name: 'PLAYER MARKET', href: '/market', icon: '💎' },
+  { name: 'MESSAGES', href: '/messages', icon: '✉️' },
+  { name: 'NOTIFICATIONS', href: '/notifications', icon: '🔔' },
+  { name: 'COMMUNITY', href: '/community', icon: '💬' },
+  { name: 'SUPPORT', href: '/support', icon: '🎧' },
+  { name: 'MY PROFILE', href: '/dashboard', icon: '⚙️' },
 ]
 
-const features = [
-  ['01', 'COMPETITIONS', 'Regional leagues, divisions and tournaments.'],
-  ['02', 'LIVE STATISTICS', 'Track goals, assists, saves and player performances.'],
-  ['03', 'TEAM MANAGEMENT', 'Manage squads, registrations and transfers.'],
-  ['04', 'PLAYER RANKINGS', 'Discover the best players across every region.'],
-]
+function formatDate(date: string | null) {
+  if (!date) return 'DATE TBA'
 
-const playerLinks = [
-  { name: 'COMPETITIONS', description: 'Leagues and tournaments', icon: '🏆', href: '/competitions' },
-  { name: 'RANKINGS', description: 'Player rankings and standings', icon: '📊', href: '/rankings' },
-  { name: 'CLUBS', description: 'Explore clubs and teams', icon: '🛡️', href: '/clubs' },
-  { name: 'PLAYERS', description: 'Discover players', icon: '👤', href: '/players' },
-  { name: 'FIXTURES', description: 'Matches and results', icon: '⚽', href: '/fixtures' },
-  { name: 'COMMUNITY', description: 'Posts and discussions', icon: '💬', href: '/community' },
-  { name: 'MESSAGES', description: 'Your conversations', icon: '✉️', href: '/messages' },
-  { name: 'PLAYER MARKET', description: 'Player values and market', icon: '💎', href: '/market' },
-  { name: 'NOTIFICATIONS', description: 'Your latest updates', icon: '🔔', href: '/notifications' },
-  { name: 'MY PROFILE', description: 'Your player dashboard', icon: '⚙️', href: '/dashboard' },
-]
+  return new Date(`${date}T00:00:00`).toLocaleDateString('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function timeAgo(date: string) {
+  const seconds = Math.floor(
+    (Date.now() - new Date(date).getTime()) / 1000
+  )
+
+  if (seconds < 60) return 'Just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`
+
+  return new Date(date).toLocaleDateString('en-AU')
+}
 
 export default function Home() {
   const [user, setUser] = useState<any>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [checking, setChecking] = useState(true)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [competitions, setCompetitions] = useState<Competition[]>([])
+  const [posts, setPosts] = useState<Post[]>([])
+  const [loadingData, setLoadingData] = useState(false)
 
   useEffect(() => {
     let active = true
 
-    async function checkUser() {
-      const { data: { user } } = await supabase.auth.getUser()
+    async function loadHome() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
       if (!active) return
 
       setUser(user)
 
       if (user) {
-        const { data } = await supabase.rpc('is_nvpl_super_admin')
-        if (active) setIsAdmin(data === true)
+        const { data: adminData } = await supabase.rpc(
+          'is_nvpl_super_admin'
+        )
+
+        if (active) setIsAdmin(adminData === true)
       }
 
       if (active) setChecking(false)
     }
 
-    checkUser()
+    loadHome()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (!active) return
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return
 
-        setUser(session?.user ?? null)
+      setUser(session?.user ?? null)
 
-        if (session?.user) {
-          const { data } = await supabase.rpc('is_nvpl_super_admin')
-          if (active) setIsAdmin(data === true)
-        } else {
-          setIsAdmin(false)
-        }
-
-        if (active) setChecking(false)
+      if (!session?.user) {
+        setIsAdmin(false)
       }
-    )
+    })
 
     return () => {
       active = false
       subscription.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (!user) return
+
+    let active = true
+
+    async function loadDashboard() {
+      setLoadingData(true)
+
+      const today = new Date().toISOString().slice(0, 10)
+
+      const [competitionResult, postResult] = await Promise.all([
+        supabase
+          .from('competitions')
+          .select(
+            'id, name, region, division, season, status, start_date, description'
+          )
+          .gte('start_date', today)
+          .order('start_date', { ascending: true })
+          .limit(5),
+
+        supabase
+          .from('nvpl_community_posts')
+          .select(
+            'id, author_id, author_username, author_avatar, content, image_url, pinned, featured, created_at'
+          )
+          .order('pinned', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(6),
+      ])
+
+      if (!active) return
+
+      if (!competitionResult.error) {
+        setCompetitions(competitionResult.data ?? [])
+      }
+
+      if (!postResult.error) {
+        setPosts(postResult.data ?? [])
+      }
+
+      setLoadingData(false)
+    }
+
+    loadDashboard()
+
+    return () => {
+      active = false
+    }
+  }, [user])
 
   async function signOut() {
     await supabase.auth.signOut()
@@ -94,256 +183,331 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#080b12] text-white">
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#080b12]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-5">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#080b12]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
           <Link href="/" className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-600 text-2xl font-black italic">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-2xl font-black italic">
               N
             </div>
             <div>
               <div className="text-xl font-black tracking-widest">NVPL</div>
-              <div className="text-[9px] tracking-[3px] text-gray-400">
+              <div className="text-[9px] tracking-[3px] text-gray-500">
                 NATIONAL VIRTUAL PRO LEAGUE
               </div>
             </div>
           </Link>
 
           {user ? (
-            <nav className="flex flex-wrap items-center gap-4 text-xs font-semibold text-gray-300">
-              <a href="#hub" className="hover:text-blue-400">HOME</a>
-              <Link href="/community" className="hover:text-blue-400">COMMUNITY</Link>
-              <Link href="/market" className="hover:text-blue-400">MARKET</Link>
-              {isAdmin && (
-                <Link href="/admin" className="text-blue-400 hover:text-blue-300">
-                  ADMIN PANEL
-                </Link>
-              )}
-              <button onClick={signOut} className="rounded-lg border border-white/20 px-4 py-3 hover:bg-white/10">
-                SIGN OUT
-              </button>
-            </nav>
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              aria-label="Toggle navigation menu"
+              className="flex h-11 w-11 flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 hover:border-blue-500"
+            >
+              <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? 'translate-y-2 rotate-45' : ''}`} />
+              <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? 'opacity-0' : ''}`} />
+              <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? '-translate-y-2 -rotate-45' : ''}`} />
+            </button>
           ) : (
-            <>
-              <nav className="flex flex-wrap items-center gap-5 text-xs font-semibold text-gray-300">
-                <a href="#regions" className="hover:text-blue-400">REGIONS</a>
-                <a href="#competitions" className="hover:text-blue-400">COMPETITIONS</a>
-                <a href="#features" className="hover:text-blue-400">PLATFORM</a>
-                <Link href="/community" className="hover:text-blue-400">COMMUNITY</Link>
-              </nav>
-              <div className="flex items-center gap-3">
-                <Link href="/login" className="rounded-lg border border-white/20 px-4 py-3 text-xs font-bold hover:bg-white/10">
-                  LOGIN
-                </Link>
-                <Link href="/login" className="rounded-lg bg-blue-600 px-5 py-3 text-xs font-bold tracking-wider hover:bg-blue-500">
-                  JOIN NVPL
-                </Link>
-              </div>
-            </>
+            <div className="flex items-center gap-3">
+              <Link href="/login" className="rounded-lg border border-white/20 px-5 py-3 text-xs font-bold hover:bg-white/10">
+                LOGIN
+              </Link>
+              <Link href="/login" className="rounded-lg bg-blue-600 px-5 py-3 text-xs font-bold hover:bg-blue-500">
+                JOIN NVPL
+              </Link>
+            </div>
           )}
         </div>
       </header>
 
       {user ? (
-        <section id="hub" className="mx-auto max-w-7xl px-6 py-12 md:py-20">
-          <div className="mb-12 rounded-2xl border border-blue-500/20 bg-gradient-to-r from-blue-600/20 to-[#101827] p-8 md:p-12">
-            <p className="text-xs font-bold tracking-[4px] text-blue-400">
-              NATIONAL VIRTUAL PRO LEAGUE
-            </p>
-            <h1 className="mt-5 text-4xl font-black md:text-6xl">
-              WELCOME TO NVPL.
-            </h1>
-            <p className="mt-4 text-gray-400">
-              Your competitions. Your clubs. Your platform.
-            </p>
-            <p className="mt-5 text-sm text-gray-500">
-              Signed in as {user.email}
-            </p>
-          </div>
-
-          <div className="mb-8">
-            <p className="text-xs font-bold tracking-[4px] text-blue-400">
-              YOUR PLATFORM
-            </p>
-            <h2 className="mt-3 text-3xl font-black">EXPLORE NVPL.</h2>
-            <p className="mt-3 text-gray-400">
-              Everything you need, accessible from one place.
-            </p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {playerLinks.map(item => (
-              <Link
-                key={item.name}
-                href={item.href}
-                className="group rounded-2xl border border-white/10 bg-[#101827] p-6 transition hover:-translate-y-1 hover:border-blue-500/60 hover:bg-[#141f31]"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-3xl">{item.icon}</span>
-                  <span className="text-blue-400 transition group-hover:translate-x-1">→</span>
-                </div>
-                <h3 className="mt-7 font-black tracking-wide">{item.name}</h3>
-                <p className="mt-2 text-sm text-gray-400">{item.description}</p>
-              </Link>
-            ))}
-          </div>
-
-          {isAdmin && (
-            <Link
-              href="/admin"
-              className="mt-10 flex items-center justify-between rounded-2xl border border-blue-500/30 bg-blue-600/10 p-7 transition hover:bg-blue-600/20"
-            >
-              <div>
-                <p className="text-xs font-bold tracking-[3px] text-blue-400">
-                  ADMINISTRATION
-                </p>
-                <h3 className="mt-2 text-2xl font-black">NVPL ADMIN PANEL</h3>
-                <p className="mt-2 text-sm text-gray-400">
-                  Manage players, clubs, competitions and the platform.
-                </p>
-              </div>
-              <span className="text-3xl text-blue-400">→</span>
-            </Link>
-          )}
-        </section>
-      ) : (
         <>
-          <section className="relative overflow-hidden border-b border-white/10">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_75%_30%,rgba(37,99,235,0.22),transparent_55%)]" />
-            <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-6 py-28 md:grid-cols-2 md:py-36">
-              <div>
-                <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-xs font-bold tracking-widest text-blue-400">
-                  <span className="h-2 w-2 rounded-full bg-blue-400" />
-                  THE NEXT GENERATION OF PRO CLUBS
+          {menuOpen && (
+            <div className="fixed inset-0 z-50 bg-black/70" onClick={() => setMenuOpen(false)}>
+              <aside
+                className="ml-auto flex h-full w-full max-w-sm flex-col overflow-y-auto border-l border-white/10 bg-[#0d1422] p-6"
+                onClick={event => event.stopPropagation()}
+              >
+                <div className="mb-8 flex items-center justify-between">
+                  <div className="text-xl font-black tracking-widest">NVPL MENU</div>
+                  <button onClick={() => setMenuOpen(false)} className="text-2xl text-gray-400 hover:text-white">
+                    ×
+                  </button>
                 </div>
-                <h1 className="text-5xl font-black leading-[1.08] tracking-tight md:text-7xl">
-                  ONE GAME.
-                  <br />
-                  <span className="text-blue-500">THREE REGIONS.</span>
-                  <br />
-                  ONE COMMUNITY.
-                </h1>
-                <p className="mt-7 max-w-lg text-lg leading-8 text-gray-400">
-                  A competitive home for Pro Clubs. Discover competitions,
-                  represent your team and compete against the best.
-                </p>
-                <div className="mt-10 flex flex-wrap gap-4">
-                  <Link href="/login" className="rounded-lg bg-blue-600 px-7 py-4 text-sm font-bold tracking-wider hover:bg-blue-500">
-                    JOIN NVPL →
-                  </Link>
-                  <a href="#features" className="rounded-lg border border-white/20 px-7 py-4 text-sm font-bold tracking-wider hover:bg-white/10">
-                    DISCOVER NVPL
-                  </a>
-                </div>
-              </div>
 
-              <div className="relative">
-                <div className="absolute inset-0 rounded-3xl bg-blue-600/20 blur-3xl" />
-                <div className="relative rounded-2xl border border-white/10 bg-[#101827] p-8 shadow-2xl">
-                  <div className="flex items-center justify-between border-b border-white/10 pb-6">
-                    <div className="text-xs font-bold tracking-[3px] text-gray-400">NVPL NETWORK</div>
-                    <div className="text-xs font-bold text-blue-400">GLOBAL</div>
-                  </div>
-                  <div className="py-10 text-center">
-                    <div className="text-8xl font-black italic tracking-tighter text-blue-500">NVPL</div>
-                    <p className="mt-3 text-xs tracking-[5px] text-gray-400">BUILT FOR COMPETITION</p>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    {regions.map(region => (
-                      <div key={region.code} className="rounded-xl border border-white/10 bg-white/5 p-4 text-center">
-                        <div className="text-xl font-black">{region.code}</div>
-                        <div className="mt-2 text-[9px] font-bold tracking-wider text-gray-400">{region.name}</div>
-                      </div>
-                    ))}
-                  </div>
+                <div className="mb-6 rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs text-gray-500">SIGNED IN AS</p>
+                  <p className="mt-1 break-all font-bold">{user.email}</p>
                 </div>
-              </div>
-            </div>
-          </section>
 
-          <section id="regions" className="mx-auto max-w-7xl px-6 py-24">
-            <div className="mb-12">
-              <p className="text-xs font-bold tracking-[4px] text-blue-400">COMPETE WORLDWIDE</p>
-              <h2 className="mt-4 text-4xl font-black md:text-5xl">OUR REGIONS</h2>
-              <p className="mt-4 text-gray-400">Three competitive regions. One connected platform.</p>
-            </div>
-            <div className="grid gap-5 md:grid-cols-3">
-              {regions.map((region, index) => (
-                <div key={region.code} className="group rounded-2xl border border-white/10 bg-[#101827] p-8 transition hover:-translate-y-1 hover:border-blue-500/60">
-                  <div className="text-sm font-bold tracking-widest text-blue-400">REGION 0{index + 1}</div>
-                  <div className="my-8 text-6xl font-black tracking-tight">{region.code}</div>
-                  <h3 className="text-xl font-extrabold">{region.name}</h3>
-                  <p className="mt-3 text-sm text-gray-400">{region.divisions}</p>
-                  <div className="mt-8 border-t border-white/10 pt-5 text-sm font-bold text-blue-400">COMING SOON</div>
-                </div>
-              ))}
-            </div>
-          </section>
+                <nav className="flex-1 space-y-1">
+                  {menuLinks.map(item => (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-4 rounded-lg px-4 py-3 text-sm font-bold text-gray-300 transition hover:bg-blue-600/15 hover:text-white"
+                    >
+                      <span className="w-6 text-lg">{item.icon}</span>
+                      {item.name}
+                    </Link>
+                  ))}
 
-          <section id="competitions" className="border-y border-white/10 bg-[#0d121d]">
-            <div className="mx-auto grid max-w-7xl gap-10 px-6 py-20 md:grid-cols-2 md:items-center">
-              <div>
-                <p className="text-xs font-bold tracking-[4px] text-blue-400">YOUR JOURNEY STARTS HERE</p>
-                <h2 className="mt-5 text-4xl font-black md:text-5xl">BUILT FOR THE COMPETITIVE SCENE.</h2>
-                <p className="mt-6 leading-8 text-gray-400">
-                  From league campaigns to individual player rankings,
-                  NVPL aims to bring the competitive Pro Clubs community together.
-                </p>
-                <Link href="/login" className="mt-8 inline-block rounded-lg bg-blue-600 px-6 py-4 text-sm font-bold hover:bg-blue-500">
-                  GET STARTED →
+                  {isAdmin && (
+                    <Link
+                      href="/admin"
+                      onClick={() => setMenuOpen(false)}
+                      className="mt-4 flex items-center gap-4 rounded-lg border border-blue-500/30 bg-blue-600/10 px-4 py-3 text-sm font-bold text-blue-400 hover:bg-blue-600/20"
+                    >
+                      <span className="w-6 text-lg">🛠️</span>
+                      ADMIN PANEL
+                    </Link>
+                  )}
+                </nav>
+
+                <button
+                  onClick={signOut}
+                  className="mt-8 rounded-lg border border-white/15 px-5 py-4 text-sm font-bold text-gray-300 hover:bg-white/10"
+                >
+                  SIGN OUT
+                </button>
+              </aside>
+            </div>
+          )}
+
+          <div className="mx-auto max-w-7xl px-5 py-8 md:py-12">
+            <section className="mb-10 overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-r from-blue-950 via-[#101827] to-[#101827] p-7 md:p-10">
+              <p className="text-xs font-bold tracking-[4px] text-blue-400">
+                NATIONAL VIRTUAL PRO LEAGUE
+              </p>
+              <h1 className="mt-4 text-3xl font-black md:text-5xl">
+                WELCOME BACK.
+              </h1>
+              <p className="mt-3 text-gray-400">
+                Your home for competitive Pro Clubs.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link href="/community" className="rounded-lg bg-blue-600 px-5 py-3 text-xs font-bold hover:bg-blue-500">
+                  VISIT COMMUNITY →
+                </Link>
+                <Link href="/competitions" className="rounded-lg border border-white/15 px-5 py-3 text-xs font-bold hover:bg-white/10">
+                  EXPLORE LEAGUES
                 </Link>
               </div>
-              <div className="rounded-2xl border border-blue-500/30 bg-blue-500/5 p-8">
-                <div className="text-xs font-bold tracking-[3px] text-blue-400">THE NVPL STANDARD</div>
-                <div className="mt-7 space-y-6">
-                  {['Competitive regional leagues', 'Professional team profiles', 'Detailed player statistics', 'Community tournaments'].map(item => (
-                    <div key={item} className="flex items-center gap-4 border-b border-white/10 pb-5">
-                      <span className="text-blue-400">✦</span>
-                      <span className="font-semibold">{item}</span>
-                    </div>
+            </section>
+
+            <section className="mb-12">
+              <div className="mb-6 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold tracking-[3px] text-blue-400">
+                    THE NEXT MATCHDAY STARTS HERE
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black md:text-3xl">
+                    UPCOMING COMPETITIONS
+                  </h2>
+                </div>
+                <Link href="/competitions" className="shrink-0 text-xs font-bold text-blue-400 hover:text-blue-300">
+                  VIEW ALL →
+                </Link>
+              </div>
+
+              {loadingData ? (
+                <div className="rounded-xl border border-white/10 bg-[#101827] p-8 text-center text-gray-400">
+                  Loading competitions...
+                </div>
+              ) : competitions.length === 0 ? (
+                <div className="rounded-xl border border-white/10 bg-[#101827] p-8">
+                  <p className="font-bold">No upcoming competitions listed yet.</p>
+                  <p className="mt-2 text-sm text-gray-500">
+                    New competitions will appear here when their start dates are announced.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {competitions.map(comp => (
+                    <Link
+                      key={comp.id}
+                      href="/competitions"
+                      className="group rounded-xl border border-white/10 bg-[#101827] p-6 transition hover:-translate-y-1 hover:border-blue-500/60"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="rounded-md bg-blue-600/15 px-3 py-1 text-xs font-black text-blue-400">
+                          {comp.region}
+                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                          {comp.status}
+                        </span>
+                      </div>
+                      <h3 className="mt-5 text-xl font-black group-hover:text-blue-400">
+                        {comp.name}
+                      </h3>
+                      <p className="mt-2 text-sm text-gray-400">
+                        {[comp.division, comp.season].filter(Boolean).join(' • ') || 'NVPL Competition'}
+                      </p>
+                      <div className="mt-6 border-t border-white/10 pt-4">
+                        <p className="text-xs text-gray-500">START DATE</p>
+                        <p className="mt-1 font-bold">{formatDate(comp.start_date)}</p>
+                      </div>
+                    </Link>
                   ))}
                 </div>
-              </div>
-            </div>
-          </section>
+              )}
+            </section>
 
-          <section id="features" className="mx-auto max-w-7xl px-6 py-24">
-            <p className="text-xs font-bold tracking-[4px] text-blue-400">THE PLATFORM</p>
-            <h2 className="mt-4 text-4xl font-black">EVERYTHING IN ONE PLACE.</h2>
-            <div className="mt-12 grid gap-5 sm:grid-cols-2">
-              {features.map(([number, title, description]) => (
-                <div key={number} className="rounded-2xl border border-white/10 bg-[#101827] p-8 hover:border-blue-500/50">
-                  <div className="text-sm font-bold text-blue-400">{number}</div>
-                  <h3 className="mt-6 text-xl font-black">{title}</h3>
-                  <p className="mt-3 leading-7 text-gray-400">{description}</p>
+            <section>
+              <div className="mb-6 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold tracking-[3px] text-blue-400">
+                    WHAT'S HAPPENING
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black md:text-3xl">
+                    NVPL COMMUNITY
+                  </h2>
                 </div>
-              ))}
-            </div>
-          </section>
+                <Link href="/community" className="shrink-0 text-xs font-bold text-blue-400 hover:text-blue-300">
+                  OPEN COMMUNITY →
+                </Link>
+              </div>
 
-          <section className="mx-auto max-w-7xl px-6 pb-24">
-            <div className="rounded-2xl bg-blue-600 px-8 py-14 text-center md:px-16">
-              <p className="text-xs font-bold tracking-[4px] text-blue-100">NATIONAL VIRTUAL PRO LEAGUE</p>
-              <h2 className="mt-5 text-4xl font-black md:text-6xl">THIS IS NVPL.</h2>
-              <p className="mx-auto mt-5 max-w-xl text-blue-100">
-                A new home for competitive Pro Clubs. Built for teams, players and the community.
-              </p>
-              <Link href="/login" className="mt-8 inline-block rounded-lg bg-white px-7 py-4 text-sm font-bold text-blue-700 hover:bg-blue-50">
-                JOIN THE PLATFORM →
-              </Link>
-            </div>
-          </section>
+              {loadingData ? (
+                <div className="rounded-xl border border-white/10 bg-[#101827] p-8 text-center text-gray-400">
+                  Loading community...
+                </div>
+              ) : posts.length === 0 ? (
+                <div className="rounded-xl border border-white/10 bg-[#101827] p-8">
+                  <p className="font-bold">The community is waiting for its first post.</p>
+                  <p className="mt-2 text-sm text-gray-500">
+                    Head into the community to see discussions and updates.
+                  </p>
+                  <Link href="/community" className="mt-5 inline-block text-sm font-bold text-blue-400">
+                    VISIT COMMUNITY →
+                  </Link>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {posts.map(post => (
+                    <article
+                      key={post.id}
+                      className="overflow-hidden rounded-xl border border-white/10 bg-[#101827]"
+                    >
+                      <div className="flex items-center gap-3 p-5">
+                        {post.author_avatar ? (
+                          <img
+                            src={post.author_avatar}
+                            alt=""
+                            className="h-10 w-10 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 font-black">
+                            {(post.author_username || 'N').charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-bold">
+                            {post.author_username || 'NVPL Member'}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {timeAgo(post.created_at)}
+                          </p>
+                        </div>
+                        {post.pinned && (
+                          <span className="text-xs font-bold text-blue-400">📌 PINNED</span>
+                        )}
+                        {post.featured && (
+                          <span className="text-xs font-bold text-yellow-400">★ FEATURED</span>
+                        )}
+                      </div>
+
+                      <p className="whitespace-pre-wrap px-5 pb-5 text-sm leading-7 text-gray-300">
+                        {post.content}
+                      </p>
+
+                      {post.image_url && (
+                        <img
+                          src={post.image_url}
+                          alt="Community post"
+                          className="max-h-80 w-full object-cover"
+                        />
+                      )}
+
+                      <div className="border-t border-white/10 px-5 py-4">
+                        <Link href="/community" className="text-xs font-bold text-blue-400 hover:text-blue-300">
+                          VIEW DISCUSSION →
+                        </Link>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="mt-12 grid gap-4 sm:grid-cols-3">
+              {[
+                { name: 'ALL LEAGUES', detail: 'Explore every region', href: '/competitions', icon: '🏆' },
+                { name: 'PLAYER RANKINGS', detail: 'See the competition', href: '/rankings', icon: '📊' },
+                { name: 'GET SUPPORT', detail: 'We are here to help', href: '/support', icon: '🎧' },
+              ].map(item => (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className="flex items-center gap-4 rounded-xl border border-white/10 bg-[#101827] p-5 transition hover:border-blue-500/50"
+                >
+                  <span className="text-3xl">{item.icon}</span>
+                  <div>
+                    <p className="font-black">{item.name}</p>
+                    <p className="mt-1 text-xs text-gray-500">{item.detail}</p>
+                  </div>
+                  <span className="ml-auto text-blue-400">→</span>
+                </Link>
+              ))}
+            </section>
+          </div>
         </>
+      ) : (
+        <section className="mx-auto max-w-7xl px-6 py-32">
+          <p className="text-xs font-bold tracking-[4px] text-blue-400">
+            THE NEXT GENERATION OF PRO CLUBS
+          </p>
+          <h1 className="mt-6 text-5xl font-black leading-tight md:text-7xl">
+            ONE GAME.
+            <br />
+            <span className="text-blue-500">THREE REGIONS.</span>
+            <br />
+            ONE COMMUNITY.
+          </h1>
+          <p className="mt-7 max-w-xl text-lg leading-8 text-gray-400">
+            A competitive home for Pro Clubs. Discover competitions,
+            represent your team and compete against the best.
+          </p>
+          <div className="mt-10 flex flex-wrap gap-4">
+            <Link href="/login" className="rounded-lg bg-blue-600 px-7 py-4 text-sm font-bold hover:bg-blue-500">
+              JOIN NVPL →
+            </Link>
+            <Link href="/community" className="rounded-lg border border-white/20 px-7 py-4 text-sm font-bold hover:bg-white/10">
+              COMMUNITY
+            </Link>
+          </div>
+
+          <div className="mt-20 grid gap-5 md:grid-cols-3">
+            {[
+              ['OCE', 'OCEANIA'],
+              ['EU', 'EUROPE'],
+              ['NA', 'NORTH AMERICA'],
+            ].map(([code, name]) => (
+              <div key={code} className="rounded-xl border border-white/10 bg-[#101827] p-8">
+                <p className="text-5xl font-black text-blue-500">{code}</p>
+                <p className="mt-4 font-bold">{name}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <footer className="border-t border-white/10 px-6 py-8">
-        <div className="mx-auto flex max-w-7xl flex-col justify-between gap-4 text-sm text-gray-500 md:flex-row">
-          <div className="font-black tracking-widest text-white">NVPL</div>
-          <div>National Virtual Pro League © 2026</div>
-          <div className="flex flex-wrap gap-5">
-            <Link href="/community" className="hover:text-white">COMMUNITY</Link>
-            {user && <Link href="/dashboard" className="hover:text-white">MY PROFILE</Link>}
-            {isAdmin && <Link href="/admin" className="hover:text-white">ADMIN</Link>}
-          </div>
+        <div className="mx-auto flex max-w-7xl flex-wrap justify-between gap-4 text-xs text-gray-500">
+          <span className="font-black tracking-widest text-white">NVPL.</span>
+          <span>National Virtual Pro League © 2026</span>
+          <Link href="/support" className="hover:text-white">SUPPORT</Link>
         </div>
       </footer>
     </main>

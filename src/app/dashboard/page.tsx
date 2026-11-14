@@ -1,914 +1,608 @@
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
-type Profile = {
-  id: string
+type PlayerProfile = {
   user_id: string
-  gamertag: string | null
+  gamertag: string
   username: string | null
   position: string | null
-  region: string | null
-  country: string | null
-  bio: string | null
+  region: string
   avatar_url: string | null
-}
-
-type Team = {
-  id: string
-  name: string
-  abbreviation: string | null
-}
-
-type Membership = {
-  id: string
-  team_id: string
-  player_id: string
-  primary_position: string | null
-  squad_number: number | null
-  status: string | null
-  left_at: string | null
-}
-
-type Fixture = {
-  id: string
-  competition_id: string
-  home_team_id: string
-  away_team_id: string
-  matchweek: number | null
-  kickoff_at: string | null
-  status: string
-  home_score: number | null
-  away_score: number | null
 }
 
 type Competition = {
   id: string
   name: string
-  region: string | null
-  division: string | null
+  region: string
+  season: string
+  division: string
   status: string
-  season: string | null
-}
-
-type Notification = {
-  id: string
-  title: string
-  message: string
-  notification_type: string | null
-  link: string | null
-  is_read: boolean
-  created_at: string
+  start_date: string | null
+  image_url: string | null
 }
 
 type CommunityPost = {
   id: string
-  author_username: string
+  author_username: string | null
+  author_avatar: string | null
   content: string
-  created_at: string
+  image_url: string | null
   pinned: boolean
-  featured: boolean
+  created_at: string
 }
 
-type PlayerStats = {
-  goals: number
-  assists: number
-  shots: number
-  shotsOnTarget: number
-  saves: number
-  minutes: number
-  passesCompleted: number
-  passesAttempted: number
-}
+const regions = ['OCE', 'EU', 'NA']
 
-const emptyStats: PlayerStats = {
-  goals: 0,
-  assists: 0,
-  shots: 0,
-  shotsOnTarget: 0,
-  saves: 0,
-  minutes: 0,
-  passesCompleted: 0,
-  passesAttempted: 0,
-}
+const navigation = [
+  { label: 'Home', href: '/', icon: '⌂' },
+  { label: 'My Profile', href: '/dashboard', icon: '◉' },
+  { label: 'Community', href: '/community', icon: '◎' },
+  { label: 'Competitions', href: '/competitions', icon: '🏆' },
+  { label: 'Rankings', href: '/rankings', icon: '↗' },
+  { label: 'Clubs', href: '/clubs', icon: '⚽' },
+  { label: 'Players', href: '/players', icon: '♙' },
+  { label: 'Fixtures', href: '/fixtures', icon: '▦' },
+  { label: 'Player Market', href: '/market', icon: '◇' },
+  { label: 'Support', href: '/support', icon: '?' },
+]
 
 function formatDate(date: string | null) {
-  if (!date) return 'Date TBC'
+  if (!date) return 'Date TBA'
 
-  return new Date(date).toLocaleString('en-AU', {
-    weekday: 'short',
+  return new Date(`${date}T00:00:00`).toLocaleDateString('en-AU', {
     day: 'numeric',
     month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
+    year: 'numeric',
   })
 }
 
-function formatRelativeDate(date: string) {
-  return new Date(date).toLocaleDateString('en-AU', {
-    day: 'numeric',
-    month: 'short',
-  })
-}
+function timeAgo(date: string) {
+  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
 
-function isCompleted(status: string) {
-  return ['completed', 'played', 'finished', 'full time'].includes(
-    status.toLowerCase()
-  )
+  if (seconds < 60) return 'Just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`
+
+  return new Date(date).toLocaleDateString('en-AU')
 }
 
 export default function DashboardPage() {
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState('')
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [teams, setTeams] = useState<Team[]>([])
-  const [memberships, setMemberships] = useState<Membership[]>([])
-  const [fixtures, setFixtures] = useState<Fixture[]>([])
+  const router = useRouter()
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  const [userId, setUserId] = useState('')
+  const [email, setEmail] = useState('')
+  const [profile, setProfile] = useState<PlayerProfile | null>(null)
   const [competitions, setCompetitions] = useState<Competition[]>([])
-  const [notifications, setNotifications] = useState<Notification[]>([])
   const [posts, setPosts] = useState<CommunityPost[]>([])
-  const [stats, setStats] = useState<PlayerStats>(emptyStats)
-  const [unreadNotifications, setUnreadNotifications] = useState(0)
-  const [unreadMessages, setUnreadMessages] = useState(0)
 
-  const loadDashboard = useCallback(async () => {
-    setError('')
+  const [username, setUsername] = useState('')
+  const [gamertag, setGamertag] = useState('')
+  const [position, setPosition] = useState('')
+  const [region, setRegion] = useState('OCE')
 
-    try {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser()
+  const [preview, setPreview] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
 
-      if (authError) throw authError
-
-      if (!user) {
-        setProfile(null)
-        setError('Please sign in to view your dashboard.')
-        return
-      }
-
-      const { data: profileData, error: profileError } = await supabase
+  const loadDashboard = useCallback(async (id: string) => {
+    const [profileResult, competitionResult, postResult] = await Promise.all([
+      supabase
         .from('player_profiles')
-        .select(
-          'id, user_id, gamertag, username, position, region, country, bio, avatar_url'
-        )
-        .eq('user_id', user.id)
-        .maybeSingle()
+        .select('user_id, gamertag, username, position, region, avatar_url')
+        .eq('user_id', id)
+        .maybeSingle(),
 
-      if (profileError) throw profileError
+      supabase
+        .from('competitions')
+        .select('id, name, region, season, division, status, start_date, image_url')
+        .in('status', ['upcoming', 'registration_open'])
+        .order('created_at', { ascending: false })
+        .limit(6),
 
-      setProfile(profileData)
+      supabase
+        .from('nvpl_community_posts')
+        .select('id, author_username, author_avatar, content, image_url, pinned, created_at')
+        .order('pinned', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(5),
+    ])
 
-      const [
-        notificationResult,
-        notificationCountResult,
-        messageCountResult,
-        competitionResult,
-        postResult,
-      ] = await Promise.all([
-        supabase
-          .from('nvpl_notifications')
-          .select(
-            'id, title, message, notification_type, link, is_read, created_at'
-          )
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(6),
+    if (profileResult.error) {
+      setError(`Profile: ${profileResult.error.message}`)
+    } else if (profileResult.data) {
+      const player = profileResult.data as PlayerProfile
+      setProfile(player)
+      setUsername(player.username ?? '')
+      setGamertag(player.gamertag ?? '')
+      setPosition(player.position ?? '')
+      setRegion(player.region ?? 'OCE')
+    } else {
+      setProfile(null)
+    }
 
-        supabase
-          .from('nvpl_notifications')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('is_read', false),
+    if (!competitionResult.error) {
+      setCompetitions((competitionResult.data ?? []) as Competition[])
+    }
 
-        supabase
-          .from('nvpl_messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('recipient_id', user.id)
-          .eq('is_read', false),
-
-        supabase
-          .from('competitions')
-          .select('id, name, region, division, status, season')
-          .order('created_at', { ascending: false })
-          .limit(6),
-
-        supabase
-          .from('nvpl_community_posts')
-          .select(
-            'id, author_username, content, created_at, pinned, featured'
-          )
-          .order('created_at', { ascending: false })
-          .limit(4),
-      ])
-
-      if (notificationResult.error) throw notificationResult.error
-      if (notificationCountResult.error) throw notificationCountResult.error
-      if (messageCountResult.error) throw messageCountResult.error
-      if (competitionResult.error) throw competitionResult.error
-      if (postResult.error) throw postResult.error
-
-      setNotifications(notificationResult.data || [])
-      setUnreadNotifications(notificationCountResult.count || 0)
-      setUnreadMessages(messageCountResult.count || 0)
-      setCompetitions(competitionResult.data || [])
-      setPosts(postResult.data || [])
-
-      if (!profileData) {
-        setMemberships([])
-        setTeams([])
-        setFixtures([])
-        setStats(emptyStats)
-        return
-      }
-
-      const { data: membershipData, error: membershipError } =
-        await supabase
-          .from('club_memberships')
-          .select(
-            'id, team_id, player_id, primary_position, squad_number, status, left_at'
-          )
-          .eq('player_id', profileData.id)
-          .is('left_at', null)
-
-      if (membershipError) throw membershipError
-
-      const activeMemberships = membershipData || []
-      setMemberships(activeMemberships)
-
-      const teamIds = [
-        ...new Set(activeMemberships.map((membership) => membership.team_id)),
-      ]
-
-      if (teamIds.length > 0) {
-        const { data: teamData, error: teamError } = await supabase
-          .from('teams')
-          .select('id, name, abbreviation')
-          .in('id', teamIds)
-
-        if (teamError) throw teamError
-        setTeams(teamData || [])
-      } else {
-        setTeams([])
-      }
-
-      const { data: statData, error: statsError } = await supabase
-        .from('nvpl_match_player_stats')
-        .select(
-          'goals, assists, shots, shots_on_target, saves, minutes_played, passes_completed, passes_attempted'
-        )
-        .eq('player_id', profileData.id)
-
-      if (statsError) throw statsError
-
-      const totals = (statData || []).reduce(
-        (result, item) => ({
-          goals: result.goals + (item.goals || 0),
-          assists: result.assists + (item.assists || 0),
-          shots: result.shots + (item.shots || 0),
-          shotsOnTarget:
-            result.shotsOnTarget + (item.shots_on_target || 0),
-          saves: result.saves + (item.saves || 0),
-          minutes: result.minutes + (item.minutes_played || 0),
-          passesCompleted:
-            result.passesCompleted + (item.passes_completed || 0),
-          passesAttempted:
-            result.passesAttempted + (item.passes_attempted || 0),
-        }),
-        emptyStats
-      )
-
-      setStats(totals)
-
-      if (teamIds.length > 0) {
-        const { data: fixtureData, error: fixtureError } = await supabase
-          .from('nvpl_fixtures')
-          .select(
-            'id, competition_id, home_team_id, away_team_id, matchweek, kickoff_at, status, home_score, away_score'
-          )
-          .or(
-            `home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`
-          )
-          .order('kickoff_at', { ascending: false })
-          .limit(30)
-
-        if (fixtureError) throw fixtureError
-        setFixtures(fixtureData || [])
-      } else {
-        setFixtures([])
-      }
-    } catch (err) {
-      console.error('Dashboard loading error:', err)
-      setError(
-        err instanceof Error ? err.message : 'Unable to load dashboard.'
-      )
-    } finally {
-      setLoading(false)
+    if (!postResult.error) {
+      setPosts((postResult.data ?? []) as CommunityPost[])
     }
   }, [])
 
   useEffect(() => {
-    void loadDashboard()
+    let mounted = true
 
-    const channel = supabase
-      .channel('nvpl-dashboard-live')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'nvpl_notifications' },
-        () => void loadDashboard()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'nvpl_fixtures' },
-        () => void loadDashboard()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'nvpl_community_posts' },
-        () => void loadDashboard()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'nvpl_match_player_stats' },
-        () => void loadDashboard()
-      )
-      .subscribe()
+    async function initialise() {
+      const { data, error: sessionError } = await supabase.auth.getSession()
 
-    const handleFocus = () => void loadDashboard()
-    window.addEventListener('focus', handleFocus)
+      if (!mounted) return
+
+      if (sessionError || !data.session) {
+        router.replace('/login')
+        return
+      }
+
+      const user = data.session.user
+      setUserId(user.id)
+      setEmail(user.email ?? '')
+      await loadDashboard(user.id)
+
+      if (mounted) setLoading(false)
+    }
+
+    initialise()
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!session) {
+          router.replace('/login')
+        }
+      }
+    )
 
     return () => {
-      window.removeEventListener('focus', handleFocus)
-      void supabase.removeChannel(channel)
+      mounted = false
+      listener.subscription.unsubscribe()
     }
-  }, [loadDashboard])
+  }, [router, loadDashboard])
 
-  async function refreshDashboard() {
-    setRefreshing(true)
-    await loadDashboard()
-    setRefreshing(false)
-  }
+  async function saveProfile() {
+    if (!userId) return
 
-  async function markNotificationRead(id: string) {
-    const { error: updateError } = await supabase
-      .from('nvpl_notifications')
-      .update({ is_read: true })
-      .eq('id', id)
-
-    if (updateError) {
-      setError(updateError.message)
+    if (!gamertag.trim()) {
+      setError('Your EA FC gamertag is required.')
       return
     }
 
-    setNotifications((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, is_read: true } : item
-      )
-    )
-
-    setUnreadNotifications((count) => Math.max(0, count - 1))
-  }
-
-  async function markAllNotificationsRead() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) return
+    setSaving(true)
+    setError('')
+    setMessage('')
 
     const { error: updateError } = await supabase
-      .from('nvpl_notifications')
-      .update({ is_read: true })
-      .eq('user_id', user.id)
-      .eq('is_read', false)
+      .from('player_profiles')
+      .update({
+        gamertag: gamertag.trim(),
+        username: username.trim() || null,
+        position: position.trim() || null,
+        region,
+      })
+      .eq('user_id', userId)
 
     if (updateError) {
       setError(updateError.message)
+    } else {
+      setMessage('Profile updated successfully.')
+      await loadDashboard(userId)
+    }
+
+    setSaving(false)
+  }
+
+  async function uploadAvatar(file?: File) {
+    if (!file || !userId) return
+
+    setError('')
+    setMessage('')
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+
+    if (!allowedTypes.includes(file.type)) {
+      setError('Choose a JPG, PNG or WEBP image.')
       return
     }
 
-    setNotifications((current) =>
-      current.map((item) => ({ ...item, is_read: true }))
-    )
-    setUnreadNotifications(0)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Your image must be smaller than 5 MB.')
+      return
+    }
+
+    setUploading(true)
+
+    const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+    const path = `avatars/${userId}/${Date.now()}.${extension}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('nvpl-media')
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type,
+      })
+
+    if (uploadError) {
+      setError(uploadError.message)
+      setUploading(false)
+      return
+    }
+
+    const { data } = supabase.storage
+      .from('nvpl-media')
+      .getPublicUrl(path)
+
+    const { error: updateError } = await supabase
+      .from('player_profiles')
+      .update({ avatar_url: data.publicUrl })
+      .eq('user_id', userId)
+
+    if (updateError) {
+      setError(updateError.message)
+    } else {
+      setPreview('')
+      setMessage('Profile picture uploaded successfully.')
+      await loadDashboard(userId)
+    }
+
+    setUploading(false)
+
+    if (fileInput.current) {
+      fileInput.current.value = ''
+    }
   }
 
-  const teamName = (id: string) =>
-    teams.find((team) => team.id === id)?.name || 'Unknown club'
-
-  const competitionName = (id: string) =>
-    competitions.find((competition) => competition.id === id)?.name ||
-    'Competition'
-
-  const upcomingFixtures = fixtures
-    .filter(
-      (fixture) =>
-        !isCompleted(fixture.status) &&
-        (!fixture.kickoff_at || new Date(fixture.kickoff_at) >= new Date())
-    )
-    .sort((a, b) => {
-      if (!a.kickoff_at) return 1
-      if (!b.kickoff_at) return -1
-      return (
-        new Date(a.kickoff_at).getTime() -
-        new Date(b.kickoff_at).getTime()
-      )
-    })
-    .slice(0, 5)
-
-  const recentResults = fixtures
-    .filter((fixture) => isCompleted(fixture.status))
-    .slice(0, 5)
-
-  const displayName =
-    profile?.gamertag || profile?.username || 'Player'
+  async function logout() {
+    await supabase.auth.signOut()
+    router.replace('/login')
+  }
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#080d19] text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
-          <p className="text-gray-400">Loading your NVPL dashboard...</p>
-        </div>
+      <main className="min-h-screen bg-[#080d18] text-white flex items-center justify-center">
+        Loading your NVPL dashboard...
       </main>
     )
   }
 
+  const displayName = profile?.username || profile?.gamertag || email
+
   return (
-    <main className="min-h-screen bg-[#080d19] text-white">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <Link href="/" className="text-sm font-bold tracking-widest text-blue-400">
-              NVPL
-            </Link>
-            <h1 className="mt-2 text-3xl font-black">Player Dashboard</h1>
-            <p className="mt-1 text-sm text-gray-400">
-              Your competitive home.
-            </p>
+    <main className="min-h-screen bg-[#080d18] text-white">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0b1220]/95 backdrop-blur">
+        <div className="max-w-7xl mx-auto px-5 py-4 flex items-center justify-between">
+          <Link href="/" className="text-2xl font-black tracking-tight">
+            NVPL<span className="text-blue-500">.</span>
+          </Link>
+
+          <div className="hidden md:flex items-center gap-7 text-sm text-gray-300">
+            <Link href="/" className="hover:text-white">Home</Link>
+            <Link href="/community" className="hover:text-white">Community</Link>
+            <Link href="/competitions" className="hover:text-white">Competitions</Link>
+            <Link href="/rankings" className="hover:text-white">Rankings</Link>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/notifications"
-              className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm hover:bg-white/10"
-            >
-              Notifications
-              {unreadNotifications > 0 && (
-                <span className="ml-2 rounded-full bg-blue-600 px-2 py-0.5 text-xs">
-                  {unreadNotifications}
-                </span>
-              )}
-            </Link>
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="w-11 h-11 rounded-lg border border-white/10 flex flex-col items-center justify-center gap-1.5 hover:bg-white/5"
+            aria-label="Open navigation menu"
+          >
+            <span className="w-5 h-0.5 bg-white" />
+            <span className="w-5 h-0.5 bg-white" />
+            <span className="w-5 h-0.5 bg-white" />
+          </button>
+        </div>
 
-            <Link
-              href="/messages"
-              className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm hover:bg-white/10"
-            >
-              Messages
-              {unreadMessages > 0 && (
-                <span className="ml-2 rounded-full bg-blue-600 px-2 py-0.5 text-xs">
-                  {unreadMessages}
-                </span>
-              )}
-            </Link>
-
+        {menuOpen && (
+          <div className="absolute right-5 top-[68px] w-64 rounded-xl border border-white/10 bg-[#111a2b] p-3 shadow-2xl">
+            {navigation.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center gap-3 rounded-lg px-4 py-3 text-sm text-gray-300 hover:bg-white/5 hover:text-white"
+              >
+                <span className="w-5 text-center">{item.icon}</span>
+                {item.label}
+              </Link>
+            ))}
             <button
-              onClick={refreshDashboard}
-              disabled={refreshing}
-              className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold hover:bg-blue-500 disabled:opacity-50"
+              onClick={logout}
+              className="w-full text-left rounded-lg px-4 py-3 text-sm text-red-400 hover:bg-white/5"
             >
-              {refreshing ? 'Refreshing...' : '↻ Refresh'}
+              Sign out
             </button>
           </div>
-        </header>
+        )}
+      </header>
+
+      <div className="max-w-7xl mx-auto px-5 py-8">
+        <div className="mb-8">
+          <p className="text-xs font-bold tracking-[0.25em] text-blue-400">
+            NVPL PLAYER HUB
+          </p>
+          <h1 className="mt-2 text-3xl md:text-4xl font-black">
+            Welcome back, {displayName}.
+          </h1>
+          <p className="mt-2 text-sm text-gray-400">
+            Your competitions, community and player profile in one place.
+          </p>
+        </div>
 
         {error && (
-          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+          <div className="mb-5 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
             {error}
           </div>
         )}
 
-        {!profile ? (
-          <section className="rounded-2xl border border-white/10 bg-[#111827] p-8">
-            <h2 className="text-xl font-bold">Player profile not found</h2>
-            <p className="mt-2 text-gray-400">
-              Your account is signed in, but there is no player profile linked
-              to it yet.
-            </p>
-            <Link
-              href="/profile"
-              className="mt-5 inline-block rounded-xl bg-blue-600 px-5 py-3 font-semibold hover:bg-blue-500"
-            >
-              View profile
-            </Link>
-          </section>
-        ) : (
-          <>
-            <section className="mb-8 overflow-hidden rounded-3xl border border-blue-400/20 bg-gradient-to-r from-[#142b55] via-[#10203e] to-[#111827] p-6 sm:p-8">
-              <div className="flex flex-wrap items-center justify-between gap-6">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-widest text-blue-300">
-                    Welcome back
-                  </p>
-                  <h2 className="mt-2 text-3xl font-black sm:text-4xl">
-                    {displayName}
-                  </h2>
-                  <p className="mt-3 text-gray-300">
-                    {profile.position || 'Position not set'} ·{' '}
-                    {profile.region || 'Region not set'}
-                    {profile.country ? ` · ${profile.country}` : ''}
-                  </p>
-                  <div className="mt-5 flex flex-wrap gap-3">
-                    <Link
-                      href="/profile"
-                      className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold hover:bg-blue-500"
-                    >
-                      View player profile
-                    </Link>
-                    <Link
-                      href="/statistics"
-                      className="rounded-xl border border-white/20 px-5 py-3 text-sm font-bold hover:bg-white/10"
-                    >
-                      View statistics
-                    </Link>
-                  </div>
-                </div>
+        {message && (
+          <div className="mb-5 rounded-lg border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-300">
+            {message}
+          </div>
+        )}
 
-                {profile.avatar_url ? (
+        <section className="grid grid-cols-1 lg:grid-cols-[1.1fr_2fr] gap-6">
+          <div className="rounded-2xl border border-white/10 bg-[#111a2b] p-6">
+            <div className="flex items-center gap-4">
+              <div className="relative shrink-0">
+                {preview || profile?.avatar_url ? (
                   <img
-                    src={profile.avatar_url}
+                    src={preview || profile?.avatar_url || ''}
                     alt="Player avatar"
-                    className="h-24 w-24 rounded-full border-4 border-white/20 object-cover"
+                    className="h-24 w-24 rounded-full object-cover border-2 border-blue-500"
                   />
                 ) : (
-                  <div className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-white/10 bg-blue-600 text-3xl font-black">
-                    {displayName.charAt(0).toUpperCase()}
+                  <div className="h-24 w-24 rounded-full border-2 border-blue-500 bg-[#1c2b45] flex items-center justify-center text-3xl font-black">
+                    {(displayName[0] || 'N').toUpperCase()}
                   </div>
                 )}
+                <span className="absolute bottom-0 right-0 h-5 w-5 rounded-full bg-green-500 border-4 border-[#111a2b]" />
               </div>
-            </section>
 
-            <section className="mb-8">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xl font-bold">Career statistics</h2>
-                <Link href="/statistics" className="text-sm text-blue-400 hover:text-blue-300">
-                  Full statistics →
+              <div className="min-w-0">
+                <p className="text-xs text-blue-400 font-bold tracking-widest">PLAYER PROFILE</p>
+                <h2 className="mt-1 text-xl font-black truncate">{displayName}</h2>
+                <p className="text-sm text-gray-400 truncate">{profile?.gamertag || 'Add your gamertag'}</p>
+                <p className="mt-1 text-xs text-gray-500">{profile?.region || 'Region not set'}</p>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <input
+                ref={fileInput}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (file) {
+                    setPreview(URL.createObjectURL(file))
+                    uploadAvatar(file)
+                  }
+                }}
+              />
+
+              <button
+                onClick={() => fileInput.current?.click()}
+                disabled={uploading}
+                className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold hover:bg-blue-500 disabled:opacity-50"
+              >
+                {uploading ? 'Uploading image...' : 'Upload profile picture'}
+              </button>
+              <p className="mt-2 text-xs text-gray-500">JPG, PNG or WEBP · Maximum 5 MB</p>
+            </div>
+
+            <div className="mt-7 border-t border-white/10 pt-6">
+              <h3 className="text-lg font-bold">Edit player details</h3>
+
+              <label className="mt-4 block text-xs text-gray-400">Username</label>
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="Your NVPL username"
+                className="mt-2 w-full rounded-lg border border-white/10 bg-[#080d18] px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+
+              <label className="mt-4 block text-xs text-gray-400">EA FC Gamertag</label>
+              <input
+                value={gamertag}
+                onChange={(event) => setGamertag(event.target.value)}
+                placeholder="Your EA FC gamertag"
+                className="mt-2 w-full rounded-lg border border-white/10 bg-[#080d18] px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+
+              <label className="mt-4 block text-xs text-gray-400">Position</label>
+              <input
+                value={position}
+                onChange={(event) => setPosition(event.target.value)}
+                placeholder="e.g. GK, CB, CM, ST"
+                className="mt-2 w-full rounded-lg border border-white/10 bg-[#080d18] px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+
+              <label className="mt-4 block text-xs text-gray-400">Region</label>
+              <select
+                value={region}
+                onChange={(event) => setRegion(event.target.value)}
+                className="mt-2 w-full rounded-lg border border-white/10 bg-[#080d18] px-4 py-3 text-sm outline-none focus:border-blue-500"
+              >
+                {regions.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+
+              <button
+                onClick={saveProfile}
+                disabled={saving || !profile}
+                className="mt-5 w-full rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-sm font-bold text-blue-300 hover:bg-blue-500/20 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Save profile details'}
+              </button>
+
+              {!profile && (
+                <p className="mt-3 text-xs text-amber-300">
+                  No player profile is linked to this account yet. Contact an NVPL admin to link your player profile.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <section className="rounded-2xl border border-white/10 bg-[#111a2b] p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold tracking-widest text-blue-400">NVPL LEAGUES</p>
+                  <h2 className="mt-1 text-2xl font-black">Explore regions</h2>
+                </div>
+                <Link href="/competitions" className="text-sm text-blue-400 hover:text-blue-300">
+                  All competitions →
                 </Link>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
-                  ['Goals', stats.goals],
-                  ['Assists', stats.assists],
-                  ['Shots', stats.shots],
-                  ['Shots on target', stats.shotsOnTarget],
-                  ['Saves', stats.saves],
-                  ['Minutes played', stats.minutes],
-                  ['Passes completed', stats.passesCompleted],
-                  [
-                    'Passing accuracy',
-                    stats.passesAttempted > 0
-                      ? `${Math.round(
-                          (stats.passesCompleted / stats.passesAttempted) *
-                            100
-                        )}%`
-                      : '0%',
-                  ],
-                ].map(([label, value]) => (
-                  <div
-                    key={String(label)}
-                    className="rounded-2xl border border-white/10 bg-[#111827] p-5"
+                  { name: 'OCEANIA', code: 'OCE' },
+                  { name: 'EUROPE', code: 'EU' },
+                  { name: 'NORTH AMERICA', code: 'NA' },
+                ].map((item) => (
+                  <Link
+                    key={item.code}
+                    href={`/competitions?region=${item.code}`}
+                    className="rounded-xl border border-white/10 bg-[#080d18] p-5 hover:border-blue-500/50"
                   >
-                    <p className="text-sm text-gray-400">{label}</p>
-                    <p className="mt-2 text-3xl font-black">{value}</p>
-                  </div>
+                    <p className="text-xs font-bold text-blue-400">{item.code}</p>
+                    <h3 className="mt-2 text-sm font-black">{item.name}</h3>
+                    <p className="mt-3 text-xs text-gray-500">View leagues →</p>
+                  </Link>
                 ))}
               </div>
             </section>
 
-            <div className="grid gap-8 lg:grid-cols-2">
-              <section className="rounded-2xl border border-white/10 bg-[#111827] p-5">
-                <div className="mb-5 flex items-center justify-between">
-                  <h2 className="text-xl font-bold">My clubs</h2>
-                  <Link href="/clubs" className="text-sm text-blue-400">
-                    All clubs →
-                  </Link>
+            <section className="rounded-2xl border border-white/10 bg-[#111a2b] p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold tracking-widest text-blue-400">GET INVOLVED</p>
+                  <h2 className="mt-1 text-2xl font-black">NVPL community</h2>
                 </div>
+                <Link href="/community" className="text-sm text-blue-400 hover:text-blue-300">
+                  Open community →
+                </Link>
+              </div>
 
-                {memberships.length === 0 ? (
-                  <p className="text-sm text-gray-400">
-                    You are not currently listed in a club.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {memberships.map((membership) => (
-                      <Link
-                        key={membership.id}
-                        href="/clubs"
-                        className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-blue-500/40"
-                      >
-                        <div>
-                          <p className="font-bold">
-                            {teamName(membership.team_id)}
-                          </p>
-                          <p className="mt-1 text-sm text-gray-400">
-                            {membership.primary_position || 'Position TBC'}
-                            {membership.squad_number !== null
-                              ? ` · #${membership.squad_number}`
-                              : ''}
-                          </p>
-                        </div>
-                        <span className="text-blue-400">→</span>
-                      </Link>
-                    ))}
-                  </div>
+              <div className="mt-5 space-y-4">
+                {posts.length === 0 && (
+                  <p className="text-sm text-gray-400">No community posts are available yet.</p>
                 )}
-              </section>
 
-              <section className="rounded-2xl border border-white/10 bg-[#111827] p-5">
-                <div className="mb-5 flex items-center justify-between">
-                  <h2 className="text-xl font-bold">Upcoming fixtures</h2>
-                  <Link href="/fixtures" className="text-sm text-blue-400">
-                    All fixtures →
-                  </Link>
-                </div>
-
-                {upcomingFixtures.length === 0 ? (
-                  <p className="text-sm text-gray-400">
-                    No upcoming fixtures are currently listed for your clubs.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {upcomingFixtures.map((fixture) => (
-                      <Link
-                        key={fixture.id}
-                        href="/fixtures"
-                        className="block rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-blue-500/40"
-                      >
-                        <p className="mb-3 text-xs text-blue-300">
-                          {competitionName(fixture.competition_id)}
-                          {fixture.matchweek
-                            ? ` · Matchweek ${fixture.matchweek}`
-                            : ''}
-                        </p>
-                        <div className="flex items-center justify-between gap-3 text-sm font-semibold">
-                          <span>{teamName(fixture.home_team_id)}</span>
-                          <span className="text-gray-500">VS</span>
-                          <span className="text-right">
-                            {teamName(fixture.away_team_id)}
-                          </span>
+                {posts.map((post) => (
+                  <article key={post.id} className="border-b border-white/10 pb-4 last:border-0 last:pb-0">
+                    <div className="flex items-center gap-3">
+                      {post.author_avatar ? (
+                        <img src={post.author_avatar} alt="" className="h-9 w-9 rounded-full object-cover" />
+                      ) : (
+                        <div className="h-9 w-9 rounded-full bg-[#263750] flex items-center justify-center font-bold">
+                          {(post.author_username?.[0] || 'N').toUpperCase()}
                         </div>
-                        <p className="mt-3 text-xs text-gray-400">
-                          {formatDate(fixture.kickoff_at)}
-                        </p>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </section>
+                      )}
+                      <div>
+                        <p className="text-sm font-bold">{post.author_username || 'NVPL Member'}</p>
+                        <p className="text-xs text-gray-500">{timeAgo(post.created_at)}</p>
+                      </div>
+                      {post.pinned && (
+                        <span className="ml-auto text-xs text-blue-400">PINNED</span>
+                      )}
+                    </div>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-gray-300">
+                      {post.content}
+                    </p>
+                    {post.image_url && (
+                      <img
+                        src={post.image_url}
+                        alt="Community post"
+                        className="mt-3 max-h-64 w-full rounded-xl object-cover"
+                      />
+                    )}
+                  </article>
+                ))}
+              </div>
+            </section>
+          </div>
+        </section>
 
-              <section className="rounded-2xl border border-white/10 bg-[#111827] p-5">
-                <div className="mb-5 flex items-center justify-between">
-                  <h2 className="text-xl font-bold">Recent results</h2>
-                  <Link href="/fixtures" className="text-sm text-blue-400">
-                    Match history →
-                  </Link>
-                </div>
+        <section className="mt-8 rounded-2xl border border-white/10 bg-[#111a2b] p-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold tracking-widest text-blue-400">WHAT'S HAPPENING</p>
+              <h2 className="mt-1 text-2xl font-black">Upcoming competitions</h2>
+            </div>
+            <Link href="/competitions" className="text-sm text-blue-400 hover:text-blue-300">
+              View all →
+            </Link>
+          </div>
 
-                {recentResults.length === 0 ? (
-                  <p className="text-sm text-gray-400">
-                    No completed results are available yet.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {recentResults.map((fixture) => (
-                      <Link
-                        key={fixture.id}
-                        href="/fixtures"
-                        className="block rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-blue-500/40"
-                      >
-                        <p className="mb-2 text-xs text-gray-400">
-                          {competitionName(fixture.competition_id)}
-                        </p>
-                        <div className="flex items-center justify-between gap-3 text-sm">
-                          <span>{teamName(fixture.home_team_id)}</span>
-                          <span className="text-lg font-black">
-                            {fixture.home_score ?? '-'} :{' '}
-                            {fixture.away_score ?? '-'}
-                          </span>
-                          <span className="text-right">
-                            {teamName(fixture.away_team_id)}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-xs text-gray-500">
-                          {formatDate(fixture.kickoff_at)}
-                        </p>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </section>
+          {competitions.length === 0 ? (
+            <p className="mt-6 text-sm text-gray-400">
+              No upcoming competitions are currently listed.
+            </p>
+          ) : (
+            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {competitions.map((competition) => (
+                <Link
+                  key={competition.id}
+                  href={`/competitions/${competition.id}`}
+                  className="group overflow-hidden rounded-xl border border-white/10 bg-[#080d18] hover:border-blue-500/50"
+                >
+                  {competition.image_url ? (
+                    <img
+                      src={competition.image_url}
+                      alt={competition.name}
+                      className="h-40 w-full object-cover transition group-hover:scale-[1.02]"
+                    />
+                  ) : (
+                    <div className="h-40 bg-gradient-to-br from-[#172b4a] to-[#080d18] flex items-center justify-center">
+                      <span className="text-4xl font-black text-blue-400">NVPL</span>
+                    </div>
+                  )}
 
-              <section className="rounded-2xl border border-white/10 bg-[#111827] p-5">
-                <div className="mb-5 flex items-center justify-between">
-                  <h2 className="text-xl font-bold">Competitions</h2>
-                  <Link href="/competitions" className="text-sm text-blue-400">
-                    Browse competitions →
-                  </Link>
-                </div>
-
-                {competitions.length === 0 ? (
-                  <p className="text-sm text-gray-400">
-                    No competitions are currently available.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {competitions.map((competition) => (
-                      <Link
-                        key={competition.id}
-                        href="/competitions"
-                        className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-blue-500/40"
-                      >
-                        <div>
-                          <p className="font-bold">{competition.name}</p>
-                          <p className="mt-1 text-xs text-gray-400">
-                            {[competition.region, competition.division, competition.season]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </p>
-                        </div>
-                        <span className="rounded-full bg-blue-500/15 px-3 py-1 text-xs text-blue-300">
-                          {competition.status}
-                        </span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-[#111827] p-5">
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-bold">Notifications</h2>
-                    <p className="mt-1 text-xs text-gray-400">
-                      {unreadNotifications} unread
+                  <div className="p-5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-blue-400">{competition.region}</span>
+                      <span className="text-xs text-gray-500">{competition.status.replaceAll('_', ' ')}</span>
+                    </div>
+                    <h3 className="mt-3 text-lg font-black">{competition.name}</h3>
+                    <p className="mt-1 text-sm text-gray-400">
+                      {competition.division} · {competition.season}
+                    </p>
+                    <p className="mt-3 text-xs text-gray-500">
+                      Starts {formatDate(competition.start_date)}
                     </p>
                   </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={markAllNotificationsRead}
-                      disabled={unreadNotifications === 0}
-                      className="text-xs font-semibold text-blue-400 disabled:text-gray-600"
-                    >
-                      Mark all read
-                    </button>
-                    <Link href="/notifications" className="text-xs text-blue-400">
-                      View all →
-                    </Link>
-                  </div>
-                </div>
-
-                {notifications.length === 0 ? (
-                  <p className="text-sm text-gray-400">
-                    You have no notifications.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {notifications.map((notification) => (
-                      <div
-                        key={notification.id}
-                        className={`rounded-xl border p-4 ${
-                          notification.is_read
-                            ? 'border-white/10 bg-white/[0.02]'
-                            : 'border-blue-500/30 bg-blue-500/[0.07]'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold">
-                              {notification.title}
-                            </p>
-                            <p className="mt-1 text-sm text-gray-400">
-                              {notification.message}
-                            </p>
-                            <p className="mt-2 text-xs text-gray-500">
-                              {formatRelativeDate(notification.created_at)}
-                            </p>
-                          </div>
-                          {!notification.is_read && (
-                            <button
-                              onClick={() =>
-                                void markNotificationRead(notification.id)
-                              }
-                              className="shrink-0 text-xs text-blue-400 hover:text-blue-300"
-                            >
-                              Mark read
-                            </button>
-                          )}
-                        </div>
-                        {notification.link && (
-                          <Link
-                            href={notification.link}
-                            onClick={() => {
-                              if (!notification.is_read) {
-                                void markNotificationRead(notification.id)
-                              }
-                            }}
-                            className="mt-3 inline-block text-xs font-semibold text-blue-400"
-                          >
-                            Open notification →
-                          </Link>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-[#111827] p-5">
-                <div className="mb-5 flex items-center justify-between">
-                  <h2 className="text-xl font-bold">Community feed</h2>
-                  <Link href="/community" className="text-sm text-blue-400">
-                    Open community →
-                  </Link>
-                </div>
-
-                {posts.length === 0 ? (
-                  <p className="text-sm text-gray-400">
-                    No community posts are available yet.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {posts.map((post) => (
-                      <Link
-                        key={post.id}
-                        href="/community"
-                        className="block rounded-xl border border-white/10 bg-white/[0.03] p-4 hover:border-blue-500/40"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-semibold">
-                            {post.author_username}
-                          </p>
-                          {post.pinned && (
-                            <span className="text-xs text-yellow-400">
-                              Pinned
-                            </span>
-                          )}
-                          {post.featured && (
-                            <span className="text-xs text-blue-400">
-                              Featured
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-2 whitespace-pre-wrap text-sm text-gray-300">
-                          {post.content}
-                        </p>
-                        <p className="mt-3 text-xs text-gray-500">
-                          {formatRelativeDate(post.created_at)}
-                        </p>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </section>
+                </Link>
+              ))}
             </div>
+          )}
+        </section>
 
-            <section className="mt-8 rounded-2xl border border-white/10 bg-[#111827] p-5">
-              <h2 className="text-xl font-bold">Quick access</h2>
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                {[
-                  ['My profile', '/profile'],
-                  ['Competitions', '/competitions'],
-                  ['Fixtures', '/fixtures'],
-                  ['Statistics', '/statistics'],
-                  ['Clubs', '/clubs'],
-                  ['Player market', '/transfers'],
-                  ['Community', '/community'],
-                  ['Messages', '/messages'],
-                  ['Support', '/support'],
-                  ['Notifications', '/notifications'],
-                ].map(([label, href]) => (
-                  <Link
-                    key={href}
-                    href={href}
-                    className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-4 text-center text-sm font-semibold hover:border-blue-500/50 hover:bg-blue-500/10"
-                  >
-                    {label} →
-                  </Link>
-                ))}
-              </div>
-            </section>
-          </>
-        )}
-
-        <footer className="mt-10 border-t border-white/10 py-6 text-center text-xs text-gray-500">
-          NVPL · Player Dashboard
+        <footer className="mt-10 border-t border-white/10 py-6 flex flex-col sm:flex-row justify-between gap-3 text-xs text-gray-500">
+          <span>© {new Date().getFullYear()} NVPL. All rights reserved.</span>
+          <span>{email}</span>
         </footer>
       </div>
     </main>

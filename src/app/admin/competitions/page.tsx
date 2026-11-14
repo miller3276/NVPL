@@ -1,7 +1,6 @@
-
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
@@ -20,6 +19,8 @@ type Competition = {
   finals_format: string
   finals_legs: number
   third_place_playoff: boolean
+  image_url: string | null
+  created_by?: string
 }
 
 const inputClass =
@@ -45,6 +46,11 @@ export default function CompetitionAdminPage() {
   const [finalsFormat, setFinalsFormat] = useState('single_elimination')
   const [finalsLegs, setFinalsLegs] = useState(1)
   const [thirdPlace, setThirdPlace] = useState(false)
+
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState('')
+  const [existingImage, setExistingImage] = useState<string | null>(null)
+  const [removeImage, setRemoveImage] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -109,6 +115,57 @@ export default function CompetitionAdminPage() {
     setFinalsFormat('single_elimination')
     setFinalsLegs(1)
     setThirdPlace(false)
+    setImageFile(null)
+    setImagePreview('')
+    setExistingImage(null)
+    setRemoveImage(false)
+  }
+
+  function chooseImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setMessage('Please select an image file.')
+      setMessageError(true)
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage('Competition image must be smaller than 5MB.')
+      setMessageError(true)
+      return
+    }
+
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+    setRemoveImage(false)
+    setMessage('')
+  }
+
+  async function uploadCompetitionImage(
+    competitionId: string,
+    file: File
+  ) {
+    const extension =
+      file.name.split('.').pop()?.toLowerCase() || 'jpg'
+
+    const path = `${competitionId}/${Date.now()}.${extension}`
+
+    const { error } = await supabase.storage
+      .from('competition-images')
+      .upload(path, file, {
+        upsert: true,
+        contentType: file.type,
+      })
+
+    if (error) throw error
+
+    const { data } = supabase.storage
+      .from('competition-images')
+      .getPublicUrl(path)
+
+    return data.publicUrl
   }
 
   function editCompetition(competition: Competition) {
@@ -126,11 +183,18 @@ export default function CompetitionAdminPage() {
     setFinalsLegs(competition.finals_legs ?? 1)
     setThirdPlace(competition.third_place_playoff ?? false)
 
+    setImageFile(null)
+    setImagePreview('')
+    setExistingImage(competition.image_url || null)
+    setRemoveImage(false)
+
     setMessage('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  async function saveCompetition(event: React.FormEvent<HTMLFormElement>) {
+  async function saveCompetition(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault()
 
     setMessage('')
@@ -162,55 +226,109 @@ export default function CompetitionAdminPage() {
 
     setSaving(true)
 
-    if (editingId) {
-      const { error } = await supabase
-        .from('competitions')
-        .update({
-          name: name.trim(),
-          region,
-          season: season.trim(),
-          division: division.trim(),
-          description: description.trim() || null,
-          start_date: startDate || null,
-          end_date: endDate || null,
-          status,
-          finals_qualifiers: qualifiers,
-          finals_format: finalsFormat,
-          finals_legs: finalsLegs,
-          third_place_playoff: thirdPlace,
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const user = authData.user
+
+      if (!user) throw new Error('You must be logged in.')
+
+      let competitionId = editingId
+
+      let imageUrl = removeImage ? null : existingImage
+
+      if (imageFile) {
+        if (editingId) {
+          imageUrl = await uploadCompetitionImage(editingId, imageFile)
+        }
+      }
+
+      const competitionData = {
+        name: name.trim(),
+        region,
+        season: season.trim(),
+        division: division.trim(),
+        description: description.trim() || null,
+        start_date: startDate || null,
+        end_date: endDate || null,
+        status,
+        finals_qualifiers: qualifiers,
+        finals_format: finalsFormat,
+        finals_legs: finalsLegs,
+        third_place_playoff: thirdPlace,
+        image_url: imageUrl,
+      }
+
+      if (editingId) {
+        const { error } = await supabase
+          .from('competitions')
+          .update(competitionData)
+          .eq('id', editingId)
+
+        if (error) throw error
+      } else {
+        const { error } = await supabase.rpc('create_nvpl_competition', {
+          p_name: name.trim(),
+          p_region: region,
+          p_season: season.trim(),
+          p_division: division.trim(),
+          p_description: description.trim(),
+          p_start_date: startDate || null,
+          p_end_date: endDate || null,
         })
-        .eq('id', editingId)
 
-      if (error) {
-        setMessage(error.message)
-        setMessageError(true)
-      } else {
-        setMessage('Competition updated successfully.')
-        resetForm()
-        await loadCompetitions()
-      }
-    } else {
-      const { error } = await supabase.rpc('create_nvpl_competition', {
-        p_name: name.trim(),
-        p_region: region,
-        p_season: season.trim(),
-        p_division: division.trim(),
-        p_description: description.trim(),
-        p_start_date: startDate || null,
-        p_end_date: endDate || null,
-      })
+        if (error) throw error
 
-      if (error) {
-        setMessage(error.message)
-        setMessageError(true)
-      } else {
-        setMessage('Competition created successfully.')
-        resetForm()
-        await loadCompetitions()
+        // Find the newly created competition so its image can be attached.
+        const { data: created, error: findError } = await supabase
+          .from('competitions')
+          .select('id')
+          .eq('created_by', user.id)
+          .eq('name', name.trim())
+          .eq('region', region)
+          .eq('season', season.trim())
+          .eq('division', division.trim())
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (findError) throw findError
+
+        competitionId = created?.id ?? null
+
+        if (!competitionId) {
+          throw new Error(
+            'Competition created, but its ID could not be retrieved. Refresh the list and edit the competition to add its image.'
+          )
+        }
+
+        if (imageFile) {
+          imageUrl = await uploadCompetitionImage(competitionId, imageFile)
+
+          const { error: imageError } = await supabase
+            .from('competitions')
+            .update({ image_url: imageUrl })
+            .eq('id', competitionId)
+
+          if (imageError) throw imageError
+        }
       }
+
+      setMessage(
+        editingId
+          ? 'Competition updated successfully.'
+          : 'Competition created successfully.'
+      )
+
+      resetForm()
+      await loadCompetitions()
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Something went wrong.'
+      )
+      setMessageError(true)
+    } finally {
+      setSaving(false)
     }
-
-    setSaving(false)
   }
 
   async function changeStatus(id: string, newStatus: string) {
@@ -267,10 +385,13 @@ export default function CompetitionAdminPage() {
     )
   }
 
+  const displayedImage = imagePreview || (
+    !removeImage ? existingImage || '' : ''
+  )
+
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
       <div className="max-w-6xl mx-auto">
-
         <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
           <div>
             <p className="text-blue-400 text-sm font-semibold">
@@ -306,7 +427,7 @@ export default function CompetitionAdminPage() {
                 {editingId ? 'Edit competition' : 'Create competition'}
               </h2>
               <p className="text-gray-400 text-sm mt-1">
-                Manage competition information and Finals settings.
+                Manage competition details, images and Finals settings.
               </p>
             </div>
 
@@ -420,6 +541,47 @@ export default function CompetitionAdminPage() {
             </label>
 
             <div className="border-t border-gray-800 pt-5">
+              <h3 className="text-xl font-bold">Competition image</h3>
+              <p className="mt-1 text-sm text-gray-400">
+                Upload a competition logo or banner. Maximum size 5MB.
+              </p>
+
+              {displayedImage && (
+                <img
+                  src={displayedImage}
+                  alt="Competition preview"
+                  className="mt-4 h-48 w-full max-w-xl rounded-xl border border-gray-700 object-cover"
+                />
+              )}
+
+              <div className="mt-4 flex flex-wrap gap-3">
+                <label className="cursor-pointer rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold hover:bg-blue-500">
+                  Choose image
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={chooseImage}
+                    className="hidden"
+                  />
+                </label>
+
+                {(existingImage || imagePreview) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImageFile(null)
+                      setImagePreview('')
+                      setRemoveImage(true)
+                    }}
+                    className="rounded-lg border border-red-500/30 px-5 py-3 text-sm font-bold text-red-300 hover:bg-red-500/10"
+                  >
+                    Remove image
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-gray-800 pt-5">
               <h3 className="text-xl font-bold mb-4">
                 Finals configuration
               </h3>
@@ -516,7 +678,15 @@ export default function CompetitionAdminPage() {
                   className="bg-gray-900 border border-gray-800 rounded-xl p-5"
                 >
                   <div className="flex flex-wrap justify-between gap-4">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
+                      {competition.image_url && (
+                        <img
+                          src={competition.image_url}
+                          alt={competition.name}
+                          className="mb-4 h-32 w-full max-w-sm rounded-lg object-cover"
+                        />
+                      )}
+
                       <h3 className="text-xl font-bold">
                         {competition.name}
                       </h3>
