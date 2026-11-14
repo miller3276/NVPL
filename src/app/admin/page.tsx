@@ -32,6 +32,7 @@ const sections = [
   { label: 'Competitions', href: '/admin/competitions' },
   { label: 'Clubs', href: '/admin/clubs' },
   { label: 'Players', href: '/admin/players' },
+  { label: 'Player Rankings', href: '/admin/rankings' },
   { label: 'Fixtures & Results', href: '/admin/fixtures' },
   { label: 'Community', href: '/admin/community' },
   { label: 'Moderation', href: '/admin/community' },
@@ -326,6 +327,21 @@ export default function AdminPage() {
                 </p>
               </Link>
             ))}
+          </div>
+
+          <div className="mt-5">
+            <Link
+              href="/admin/rankings"
+              className="flex items-center justify-between bg-[#111722] border border-blue-500/30 rounded-2xl p-5 hover:border-blue-500 transition"
+            >
+              <div>
+                <h3 className="font-bold text-lg">Player Rankings</h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  Edit player ranks, values, tiers and images.
+                </p>
+              </div>
+              <span className="text-blue-400 font-bold">OPEN →</span>
+            </Link>
           </div>
 
           <div className="mt-10 bg-[#111722] border border-white/10 rounded-2xl p-6">
