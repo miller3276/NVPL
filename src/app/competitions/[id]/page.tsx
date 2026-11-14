@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -40,7 +40,7 @@ type Registration = {
   status: string
 }
 
-export default function CompetitionPage() {
+function CompetitionPageContent() {
   const params = useParams()
   const id = params.id as string
 
@@ -86,12 +86,9 @@ export default function CompetitionPage() {
 
     setCompetition(competitionData as Competition)
 
-    let admin = false
-
     if (user) {
       const { data: adminData } = await supabase.rpc('nvpl_can_manage_competitions')
-      admin = adminData === true
-      setIsAdmin(admin)
+      setIsAdmin(adminData === true)
 
       const { data: staffData } = await supabase
         .from('club_staff')
@@ -345,7 +342,6 @@ export default function CompetitionPage() {
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
       <div className="max-w-6xl mx-auto">
-
         <a href="/competitions" className="text-blue-400 hover:underline">
           ← All competitions
         </a>
@@ -400,7 +396,6 @@ export default function CompetitionPage() {
         {isAdmin && (
           <section className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6">
             <h2 className="text-xl font-bold">Registration controls</h2>
-
             <p className="text-gray-400 text-sm mt-2">
               {competition.registrations_open
                 ? 'Registrations are currently open.'
@@ -428,7 +423,6 @@ export default function CompetitionPage() {
         {competition.registrations_open && myTeams.length > 0 && (
           <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
             <h2 className="text-2xl font-bold">Club registration</h2>
-
             <p className="text-gray-400 mt-2">
               Register your club for this competition.
             </p>
@@ -461,7 +455,6 @@ export default function CompetitionPage() {
         {competition.registrations_open && myTeams.length > 0 && (
           <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
             <h2 className="text-2xl font-bold">Register players</h2>
-
             <p className="text-gray-400 mt-2">
               Select players from your club's active membership.
             </p>
@@ -537,9 +530,7 @@ export default function CompetitionPage() {
 
                   <div>
                     <h3 className="font-bold">{team.name}</h3>
-                    <p className="text-sm text-green-400">
-                      Registered
-                    </p>
+                    <p className="text-sm text-green-400">Registered</p>
                   </div>
                 </div>
               ))}
@@ -586,8 +577,21 @@ export default function CompetitionPage() {
             )}
           </section>
         )}
-
       </div>
     </main>
+  )
+}
+
+export default function CompetitionPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-gray-950 text-white p-8">
+          Loading competition...
+        </main>
+      }
+    >
+      <CompetitionPageContent />
+    </Suspense>
   )
 }

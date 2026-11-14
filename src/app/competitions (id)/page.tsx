@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -40,7 +40,7 @@ type Registration = {
   status: string
 }
 
-export default function CompetitionPage() {
+function CompetitionPageContent() {
   const params = useParams()
   const id = params.id as string
 
@@ -86,12 +86,9 @@ export default function CompetitionPage() {
 
     setCompetition(competitionData as Competition)
 
-    let admin = false
-
     if (user) {
       const { data: adminData } = await supabase.rpc('nvpl_can_manage_competitions')
-      admin = adminData === true
-      setIsAdmin(admin)
+      setIsAdmin(adminData === true)
 
       const { data: staffData } = await supabase
         .from('club_staff')
@@ -345,7 +342,6 @@ export default function CompetitionPage() {
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
       <div className="max-w-6xl mx-auto">
-
         <a href="/competitions" className="text-blue-400 hover:underline">
           ← All competitions
         </a>
@@ -537,9 +533,7 @@ export default function CompetitionPage() {
 
                   <div>
                     <h3 className="font-bold">{team.name}</h3>
-                    <p className="text-sm text-green-400">
-                      Registered
-                    </p>
+                    <p className="text-sm text-green-400">Registered</p>
                   </div>
                 </div>
               ))}
@@ -586,8 +580,21 @@ export default function CompetitionPage() {
             )}
           </section>
         )}
-
       </div>
     </main>
+  )
+}
+
+export default function CompetitionPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-gray-950 text-white p-8">
+          Loading competition...
+        </main>
+      }
+    >
+      <CompetitionPageContent />
+    </Suspense>
   )
 }

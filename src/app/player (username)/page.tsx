@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -28,7 +28,7 @@ type Club = {
   squad_number: number | null
 }
 
-export default function PlayerPage() {
+function PlayerPageContent() {
   const params = useParams<{ username: string }>()
   const router = useRouter()
   const username = params.username
@@ -297,5 +297,19 @@ export default function PlayerPage() {
         </div>
       </div>
     </main>
+  )
+}
+
+export default function PlayerPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[#080d18] text-white p-8">
+          Loading player profile...
+        </main>
+      }
+    >
+      <PlayerPageContent />
+    </Suspense>
   )
 }
