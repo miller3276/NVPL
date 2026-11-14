@@ -1,8 +1,10 @@
+
 'use client'
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import HeaderNotifications from '@/components/HeaderNotifications'
 
 type Competition = {
   id: string
@@ -33,7 +35,7 @@ const menuLinks = [
   { name: 'COMPETITIONS', href: '/competitions', icon: '⚽' },
   { name: 'RANKINGS', href: '/rankings', icon: '📊' },
   { name: 'CLUBS', href: '/clubs', icon: '🛡️' },
-  { name: 'PLAYERS', href: '/players', icon: '👤' },
+  { name: 'PLAYER DIRECTORY', href: '/directory', icon: '👤' },
   { name: 'FIXTURES', href: '/fixtures', icon: '📅' },
   { name: 'PLAYER MARKET', href: '/market', icon: '💎' },
   { name: 'MESSAGES', href: '/messages', icon: '✉️' },
@@ -198,15 +200,19 @@ export default function Home() {
           </Link>
 
           {user ? (
-            <button
-              onClick={() => setMenuOpen(!menuOpen)}
-              aria-label="Toggle navigation menu"
-              className="flex h-11 w-11 flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 hover:border-blue-500"
-            >
-              <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? 'translate-y-2 rotate-45' : ''}`} />
-              <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? 'opacity-0' : ''}`} />
-              <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? '-translate-y-2 -rotate-45' : ''}`} />
-            </button>
+            <div className="flex items-center gap-3">
+              <HeaderNotifications />
+
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                aria-label="Toggle navigation menu"
+                className="flex h-11 w-11 flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 hover:border-blue-500"
+              >
+                <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? 'translate-y-2 rotate-45' : ''}`} />
+                <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? 'opacity-0' : ''}`} />
+                <span className={`h-0.5 w-5 bg-white transition ${menuOpen ? '-translate-y-2 -rotate-45' : ''}`} />
+              </button>
+            </div>
           ) : (
             <div className="flex items-center gap-3">
               <Link href="/login" className="rounded-lg border border-white/20 px-5 py-3 text-xs font-bold hover:bg-white/10">
@@ -223,14 +229,20 @@ export default function Home() {
       {user ? (
         <>
           {menuOpen && (
-            <div className="fixed inset-0 z-50 bg-black/70" onClick={() => setMenuOpen(false)}>
+            <div
+              className="fixed inset-0 z-50 bg-black/70"
+              onClick={() => setMenuOpen(false)}
+            >
               <aside
                 className="ml-auto flex h-full w-full max-w-sm flex-col overflow-y-auto border-l border-white/10 bg-[#0d1422] p-6"
                 onClick={event => event.stopPropagation()}
               >
                 <div className="mb-8 flex items-center justify-between">
                   <div className="text-xl font-black tracking-widest">NVPL MENU</div>
-                  <button onClick={() => setMenuOpen(false)} className="text-2xl text-gray-400 hover:text-white">
+                  <button
+                    onClick={() => setMenuOpen(false)}
+                    className="text-2xl text-gray-400 hover:text-white"
+                  >
                     ×
                   </button>
                 </div>

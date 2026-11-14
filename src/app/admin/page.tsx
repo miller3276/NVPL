@@ -36,6 +36,7 @@ const sections = [
   { label: 'Fixtures & Results', href: '/admin/fixtures' },
   { label: 'Community', href: '/admin/community' },
   { label: 'Moderation', href: '/admin/community' },
+  { label: 'Message Monitor', href: '/admin/messages' },
   { label: 'Support', href: '/support' },
   { label: 'Administrators', href: '/admin/permissions' },
   { label: 'Settings', href: '/admin/management' },
@@ -67,8 +68,10 @@ export default function AdminPage() {
 
     async function initialize() {
       try {
-        const { data: { user }, error: authError } =
-          await supabase.auth.getUser()
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser()
 
         if (authError || !user) {
           router.replace('/login')
@@ -329,7 +332,7 @@ export default function AdminPage() {
             ))}
           </div>
 
-          <div className="mt-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
             <Link
               href="/admin/rankings"
               className="flex items-center justify-between bg-[#111722] border border-blue-500/30 rounded-2xl p-5 hover:border-blue-500 transition"
@@ -338,6 +341,19 @@ export default function AdminPage() {
                 <h3 className="font-bold text-lg">Player Rankings</h3>
                 <p className="text-sm text-gray-400 mt-1">
                   Edit player ranks, values, tiers and images.
+                </p>
+              </div>
+              <span className="text-blue-400 font-bold">OPEN →</span>
+            </Link>
+
+            <Link
+              href="/admin/messages"
+              className="flex items-center justify-between bg-[#111722] border border-blue-500/30 rounded-2xl p-5 hover:border-blue-500 transition"
+            >
+              <div>
+                <h3 className="font-bold text-lg">Message Monitor</h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  Review player conversations and message history.
                 </p>
               </div>
               <span className="text-blue-400 font-bold">OPEN →</span>
