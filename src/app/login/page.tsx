@@ -2,10 +2,12 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
 export default function LoginPage() {
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
@@ -18,21 +20,39 @@ export default function LoginPage() {
     setMessage('')
 
     try {
-      const result = isRegistering
-        ? await supabase.auth.signUp({ email, password })
-        : await supabase.auth.signInWithPassword({ email, password })
+      if (isRegistering) {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+        })
 
-      if (result.error) {
-        setMessage(result.error.message)
+        if (error) throw error
+
+        if (data.session) {
+          router.replace('/dashboard')
+          router.refresh()
+        } else {
+          setMessage('Account created! Check your email to confirm your account.')
+        }
       } else {
-        setMessage(
-          isRegistering
-            ? 'Account created! Check your email to confirm.'
-            : 'Login successful!'
-        )
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
+
+        if (error) throw error
+
+        setMessage('Login successful! Redirecting...')
+
+        router.replace('/dashboard')
+        router.refresh()
       }
-    } catch {
-      setMessage('Something went wrong. Please try again.')
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Something went wrong. Please try again.'
+      )
     } finally {
       setLoading(false)
     }
@@ -41,7 +61,6 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen bg-[#080d18] text-white flex items-center justify-center p-6">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111a2b] p-8">
-
         <Link href="/" className="text-blue-400 font-bold text-sm">
           ← Back to NVPL
         </Link>
