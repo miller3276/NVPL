@@ -1,4 +1,3 @@
-
 'use client'
 
 import { Suspense, useCallback, useEffect, useState } from 'react'
@@ -6,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import CompetitionTeamOfWeek from '@/components/CompetitionTeamOfWeek'
+import NVPLBadges from '@/components/NVPLBadges'
 
 type Competition = {
   id: string
@@ -602,8 +602,7 @@ function CompetitionPageContent() {
       (fixture.status || '').toLowerCase()
     )
   }
-
-  function fixtureStatus(fixture: Fixture) {
+    function fixtureStatus(fixture: Fixture) {
     if (isCompleted(fixture)) return 'Completed'
 
     if (new Date(fixture.kickoff_at).getTime() < Date.now()) {
@@ -920,6 +919,11 @@ function CompetitionPageContent() {
                 <p className="text-gray-400 text-sm">Competition status</p>
                 <p className="text-xl font-bold mt-3 capitalize">{competition.status}</p>
               </div>
+            </section>
+
+            {/* COMPETITION BADGES */}
+            <section className="mt-8">
+              <NVPLBadges competitionId={competition.id} />
             </section>
 
             {isAdmin && (
@@ -1250,8 +1254,7 @@ function CompetitionPageContent() {
             )}
           </>
         )}
-
-        {/* FIXTURES AND RESULTS */}
+                {/* FIXTURES AND RESULTS */}
         {activeTab === 'fixtures' && (
           <section className="mt-8">
             <div className="flex flex-wrap justify-between items-center gap-4">
