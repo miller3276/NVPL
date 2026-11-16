@@ -21,6 +21,7 @@ type Competition = {
   end_date: string | null
   registrations_open: boolean
   image_url: string | null
+  roster_cap: number
 }
 
 type Team = {
@@ -115,8 +116,17 @@ function CompetitionPageContent() {
 
   const [userId, setUserId] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
+
+  // Club registration selection
   const [selectedTeam, setSelectedTeam] = useState('')
+
+  // Player registration selections
+  const [selectedPlayerTeam, setSelectedPlayerTeam] = useState('')
   const [selectedPlayer, setSelectedPlayer] = useState('')
+  const [adminPlayerMode, setAdminPlayerMode] = useState(false)
+
+  // Admin roster cap
+  const [rosterCapInput, setRosterCapInput] = useState('15')
 
   const [fixtureFilter, setFixtureFilter] = useState('all')
   const [standingsView, setStandingsView] = useState('table')
@@ -141,7 +151,7 @@ function CompetitionPageContent() {
         await supabase
           .from('competitions')
           .select(
-            'id, name, region, season, division, description, status, start_date, end_date, registrations_open, image_url'
+            'id, name, region, season, division, description, status, start_date, end_date, registrations_open, image_url, roster_cap'
           )
           .eq('id', id)
           .maybeSingle()
@@ -152,14 +162,19 @@ function CompetitionPageContent() {
         return
       }
 
-      setCompetition(competitionData as Competition)
+      const competitionRow = competitionData as Competition
+      setCompetition(competitionRow)
+      setRosterCapInput(String(competitionRow.roster_cap ?? 15))
+
+      let admin = false
 
       if (user) {
         const { data: adminData } = await supabase.rpc(
           'nvpl_can_manage_competitions'
         )
 
-        setIsAdmin(adminData === true)
+        admin = adminData === true
+        setIsAdmin(admin)
 
         const { data: staffData } = await supabase
           .from('club_staff')
@@ -452,18 +467,36 @@ function CompetitionPageContent() {
       setMessage(error.message)
     } else {
       setMessage('Your club has been registered.')
+      setSelectedTeam('')
       await loadPage()
     }
 
     setSaving(false)
   }
 
-  async function loadPlayers(teamId: string) {
-    setSelectedTeam(teamId)
+  async function loadPlayers(teamId: string, adminMode = false) {
+    setSelectedPlayerTeam(teamId)
     setSelectedPlayer('')
     setPlayers([])
+    setAdminPlayerMode(adminMode)
 
     if (!teamId) return
+
+    if (adminMode) {
+      const { data, error } = await supabase
+        .from('player_profiles')
+        .select('id, username, gamertag, position, avatar_url')
+        .order('username')
+        .limit(500)
+
+      if (error) {
+        setMessage(error.message)
+        return
+      }
+
+      setPlayers((data || []) as Player[])
+      return
+    }
 
     const { data: membershipData, error } = await supabase
       .from('club_memberships')
@@ -498,7 +531,7 @@ function CompetitionPageContent() {
   }
 
   async function registerPlayer() {
-    if (!competition || !selectedTeam || !selectedPlayer) {
+    if (!competition || !selectedPlayerTeam || !selectedPlayer) {
       setMessage('Select a club and player.')
       return
     }
@@ -510,7 +543,7 @@ function CompetitionPageContent() {
       'nvpl_register_competition_player',
       {
         p_competition_id: competition.id,
-        p_team_id: selectedTeam,
+        p_team_id: selectedPlayerTeam,
         p_player_id: selectedPlayer
       }
     )
@@ -518,9 +551,17 @@ function CompetitionPageContent() {
     if (error) {
       setMessage(error.message)
     } else {
-      setMessage('Player added to the competition roster.')
+      setMessage(
+        adminPlayerMode
+          ? 'Player added by competition admin.'
+          : 'Player added to the competition roster.'
+      )
+
+      const teamId = selectedPlayerTeam
+      const mode = adminPlayerMode
+
       await loadPage()
-      await loadPlayers(selectedTeam)
+      await loadPlayers(teamId, mode)
     }
 
     setSaving(false)
@@ -547,6 +588,37 @@ function CompetitionPageContent() {
     setSaving(false)
   }
 
+  async function updateRosterCap() {
+    if (!competition) return
+
+    const cap = Number(rosterCapInput)
+
+    if (!Number.isInteger(cap) || cap < 1 || cap > 100) {
+      setMessage('Roster cap must be a whole number between 1 and 100.')
+      return
+    }
+
+    setSaving(true)
+    setMessage('')
+
+    const { error } = await supabase.rpc(
+      'nvpl_admin_set_competition_roster_cap',
+      {
+        p_competition_id: competition.id,
+        p_roster_cap: cap
+      }
+    )
+
+    if (error) {
+      setMessage(error.message)
+    } else {
+      setMessage(`Roster cap updated to ${cap} players per club.`)
+      await loadPage()
+    }
+
+    setSaving(false)
+  }
+
   function teamName(teamId: string) {
     return (
       registeredTeams.find(team => team.id === teamId)?.name ||
@@ -566,6 +638,12 @@ function CompetitionPageContent() {
   function playerName(playerId: string) {
     const player = profiles.find(profile => profile.id === playerId)
     return player?.username || player?.gamertag || 'Player'
+  }
+
+  function teamPlayerCount(teamId: string) {
+    return registrations.filter(
+      registration => registration.team_id === teamId
+    ).length
   }
 
   function formatDate(date: string | null) {
@@ -694,7 +772,6 @@ function CompetitionPageContent() {
               <span className="text-blue-400 font-bold uppercase tracking-widest text-sm">
                 {competition.region}
               </span>
-
               <span className="bg-gray-800 px-4 py-2 rounded-full text-sm capitalize">
                 {competition.status}
               </span>
@@ -718,11 +795,9 @@ function CompetitionPageContent() {
               <span className="bg-gray-800/90 px-4 py-2 rounded-lg text-sm">
                 Starts: {formatDate(competition.start_date)}
               </span>
-
               <span className="bg-gray-800/90 px-4 py-2 rounded-lg text-sm">
                 Ends: {formatDate(competition.end_date)}
               </span>
-
               <span
                 className={`px-4 py-2 rounded-lg text-sm font-semibold ${
                   competition.registrations_open
@@ -731,6 +806,9 @@ function CompetitionPageContent() {
                 }`}
               >
                 Registrations {competition.registrations_open ? 'Open' : 'Closed'}
+              </span>
+              <span className="bg-gray-800/90 px-4 py-2 rounded-lg text-sm">
+                Roster cap: {competition.roster_cap} players per club
               </span>
             </div>
           </div>
@@ -912,12 +990,10 @@ function CompetitionPageContent() {
               </div>
             </section>
 
-            {/* COMPETITION BADGES */}
             <section className="mt-8">
               <NVPLBadges competitionId={competition.id} />
             </section>
 
-            {/* ADMIN FIXTURE SCHEDULER */}
             {isAdmin && (
               <section className="mt-8">
                 <AdminFixtureScheduler
@@ -928,49 +1004,88 @@ function CompetitionPageContent() {
               </section>
             )}
 
+            {/* ADMIN REGISTRATION AND ROSTER SETTINGS */}
             {isAdmin && (
               <section className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6">
-                <h2 className="text-xl font-bold">Registration controls</h2>
+                <h2 className="text-2xl font-bold">Competition administration</h2>
                 <p className="text-gray-400 text-sm mt-2">
-                  {competition.registrations_open
-                    ? 'Registrations are currently open.'
-                    : 'Registrations are currently closed.'}
+                  Manage registrations and the maximum number of players each club can register.
                 </p>
-                <button
-                  onClick={toggleRegistrations}
-                  disabled={saving}
-                  className={`mt-4 px-6 py-3 rounded-lg font-semibold disabled:opacity-50 ${
-                    competition.registrations_open
-                      ? 'bg-red-600 hover:bg-red-700'
-                      : 'bg-green-600 hover:bg-green-700'
-                  }`}
-                >
-                  {saving
-                    ? 'Saving...'
-                    : competition.registrations_open
-                      ? 'Close registrations'
-                      : 'Open registrations'}
-                </button>
+
+                <div className="mt-6 p-4 bg-gray-800 rounded-xl">
+                  <h3 className="font-bold">Registration controls</h3>
+                  <p className="text-gray-400 text-sm mt-2">
+                    {competition.registrations_open
+                      ? 'Registrations are currently open.'
+                      : 'Registrations are currently closed. Admins can still make roster adjustments.'}
+                  </p>
+                  <button
+                    onClick={toggleRegistrations}
+                    disabled={saving}
+                    className={`mt-4 px-6 py-3 rounded-lg font-semibold disabled:opacity-50 ${
+                      competition.registrations_open
+                        ? 'bg-red-600 hover:bg-red-700'
+                        : 'bg-green-600 hover:bg-green-700'
+                    }`}
+                  >
+                    {saving
+                      ? 'Saving...'
+                      : competition.registrations_open
+                        ? 'Close registrations'
+                        : 'Open registrations'}
+                  </button>
+                </div>
+
+                <div className="mt-4 p-4 bg-gray-800 rounded-xl">
+                  <h3 className="font-bold">Club roster cap</h3>
+                  <p className="text-gray-400 text-sm mt-2">
+                    Current limit: {competition.roster_cap} players per club.
+                    Admins can increase or decrease this limit. Existing registrations will not be removed if the cap is lowered.
+                  </p>
+
+                  <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={rosterCapInput}
+                      onChange={event => setRosterCapInput(event.target.value)}
+                      className="w-full sm:w-40 bg-gray-900 border border-gray-700 rounded-lg p-3"
+                    />
+                    <button
+                      onClick={updateRosterCap}
+                      disabled={saving}
+                      className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-semibold"
+                    >
+                      Update roster cap
+                    </button>
+                  </div>
+                </div>
               </section>
             )}
 
-            {competition.registrations_open && myTeams.length > 0 && (
+            {/* MANAGER CLUB REGISTRATION */}
+            {!isAdmin && competition.registrations_open && myTeams.length > 0 && (
               <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h2 className="text-2xl font-bold">Club registration</h2>
                 <p className="text-gray-400 mt-2">
                   Register your club for this competition.
                 </p>
+
                 <div className="flex flex-col md:flex-row gap-3 mt-5">
                   <select
                     value={selectedTeam}
-                    onChange={event => loadPlayers(event.target.value)}
+                    onChange={event => setSelectedTeam(event.target.value)}
                     className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
                   >
                     <option value="">Select your club</option>
                     {myTeams.map(team => (
-                      <option key={team.id} value={team.id}>{team.name}</option>
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
                     ))}
                   </select>
+
                   <button
                     onClick={registerTeam}
                     disabled={saving || !selectedTeam}
@@ -982,25 +1097,30 @@ function CompetitionPageContent() {
               </section>
             )}
 
-            {competition.registrations_open && myTeams.length > 0 && (
+            {/* MANAGER PLAYER REGISTRATION */}
+            {!isAdmin && competition.registrations_open && myTeams.length > 0 && (
               <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h2 className="text-2xl font-bold">Register players</h2>
                 <p className="text-gray-400 mt-2">
-                  Select players from your club's active membership.
+                  Select players individually from your club's active squad.
+                  Your club can register up to {competition.roster_cap} players.
                 </p>
+
                 <div className="flex flex-col md:flex-row gap-3 mt-5">
                   <select
-                    value={selectedTeam}
-                    onChange={event => loadPlayers(event.target.value)}
+                    value={selectedPlayerTeam}
+                    onChange={event => loadPlayers(event.target.value, false)}
                     className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
                   >
-                    <option value="">Select your club</option>
+                    <option value="">Select your registered club</option>
                     {myTeams
                       .filter(team =>
                         registeredTeams.some(registered => registered.id === team.id)
                       )
                       .map(team => (
-                        <option key={team.id} value={team.id}>{team.name}</option>
+                        <option key={team.id} value={team.id}>
+                          {team.name} ({teamPlayerCount(team.id)}/{competition.roster_cap})
+                        </option>
                       ))}
                   </select>
 
@@ -1010,29 +1130,110 @@ function CompetitionPageContent() {
                     className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
                   >
                     <option value="">Select a player</option>
-                    {players.map(player => (
-                      <option key={player.id} value={player.id}>
-                        {player.username || player.gamertag}
-                        {player.position ? ` · ${player.position}` : ''}
-                      </option>
-                    ))}
+                    {players
+                      .filter(player =>
+                        !registrations.some(registration => registration.player_id === player.id)
+                      )
+                      .map(player => (
+                        <option key={player.id} value={player.id}>
+                          {player.username || player.gamertag}
+                          {player.position ? ` · ${player.position}` : ''}
+                        </option>
+                      ))}
                   </select>
 
                   <button
                     onClick={registerPlayer}
-                    disabled={saving || !selectedTeam || !selectedPlayer}
+                    disabled={
+                      saving ||
+                      !selectedPlayerTeam ||
+                      !selectedPlayer ||
+                      teamPlayerCount(selectedPlayerTeam) >= competition.roster_cap
+                    }
                     className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-semibold"
                   >
                     Add player
                   </button>
                 </div>
+
+                {selectedPlayerTeam && (
+                  <p className="text-sm text-gray-400 mt-4">
+                    {teamPlayerCount(selectedPlayerTeam)} / {competition.roster_cap} players registered.
+                    {teamPlayerCount(selectedPlayerTeam) >= competition.roster_cap
+                      ? ' Your club has reached its roster cap.'
+                      : ` ${competition.roster_cap - teamPlayerCount(selectedPlayerTeam)} places remaining.`}
+                  </p>
+                )}
               </section>
             )}
 
+            {/* ADMIN PLAYER REGISTRATION */}
+            {isAdmin && (
+              <section className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6">
+                <h2 className="text-2xl font-bold">Admin roster adjustments</h2>
+                <p className="text-gray-400 mt-2">
+                  Add players to any registered club. Admin additions can be made when registrations are closed and can exceed the roster cap.
+                </p>
+
+                <div className="flex flex-col md:flex-row gap-3 mt-5">
+                  <select
+                    value={selectedPlayerTeam}
+                    onChange={event => loadPlayers(event.target.value, true)}
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
+                  >
+                    <option value="">Select a registered club</option>
+                    {registeredTeams.map(team => (
+                      <option key={team.id} value={team.id}>
+                        {team.name} ({teamPlayerCount(team.id)}/{competition.roster_cap})
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={selectedPlayer}
+                    onChange={event => setSelectedPlayer(event.target.value)}
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
+                  >
+                    <option value="">Select any player</option>
+                    {players
+                      .filter(player =>
+                        !registrations.some(registration => registration.player_id === player.id)
+                      )
+                      .map(player => (
+                        <option key={player.id} value={player.id}>
+                          {player.username || player.gamertag}
+                          {player.position ? ` · ${player.position}` : ''}
+                        </option>
+                      ))}
+                  </select>
+
+                  <button
+                    onClick={registerPlayer}
+                    disabled={saving || !selectedPlayerTeam || !selectedPlayer}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-semibold"
+                  >
+                    Admin add player
+                  </button>
+                </div>
+
+                {selectedPlayerTeam && (
+                  <p className="text-sm text-gray-400 mt-4">
+                    {teamName(selectedPlayerTeam)}: {teamPlayerCount(selectedPlayerTeam)} / {competition.roster_cap} players.
+                    {teamPlayerCount(selectedPlayerTeam) >= competition.roster_cap
+                      ? ' The cap has been reached. Admin override is available.'
+                      : ` ${competition.roster_cap - teamPlayerCount(selectedPlayerTeam)} places remaining.`}
+                  </p>
+                )}
+              </section>
+            )}
+
+            {/* REGISTERED CLUBS */}
             <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
               <div className="flex justify-between items-center gap-3">
                 <h2 className="text-2xl font-bold">Registered clubs</h2>
-                <span className="text-gray-400 text-sm">{registeredTeams.length} clubs</span>
+                <span className="text-gray-400 text-sm">
+                  {registeredTeams.length} clubs
+                </span>
               </div>
 
               {registeredTeams.length === 0 ? (
@@ -1055,9 +1256,12 @@ function CompetitionPageContent() {
                           {team.abbreviation || team.name.slice(0, 2)}
                         </div>
                       )}
-                      <div>
+                      <div className="flex-1">
                         <h3 className="font-bold">{team.name}</h3>
                         <p className="text-sm text-green-400">Registered</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {teamPlayerCount(team.id)} / {competition.roster_cap} players
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -1065,6 +1269,7 @@ function CompetitionPageContent() {
               )}
             </section>
 
+            {/* FIXTURE PREVIEWS */}
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <div className="flex justify-between items-center gap-3">
@@ -1132,6 +1337,7 @@ function CompetitionPageContent() {
               </div>
             </section>
 
+            {/* STANDINGS PREVIEW */}
             <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
               <div className="flex justify-between items-center gap-3">
                 <h2 className="text-xl font-bold">League standings</h2>
@@ -1183,10 +1389,9 @@ function CompetitionPageContent() {
               )}
             </section>
 
+            {/* TOP SCORERS */}
             <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
-              <div className="flex justify-between items-center gap-3">
-                <h2 className="text-xl font-bold">Top scorers</h2>
-              </div>
+              <h2 className="text-xl font-bold">Top scorers</h2>
 
               {topScorers.length === 0 ? (
                 <p className="text-gray-400 mt-5">
@@ -1221,35 +1426,70 @@ function CompetitionPageContent() {
               )}
             </section>
 
+            {/* COMPETITION ROSTERS */}
             {userId && (
               <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 className="text-2xl font-bold">Competition rosters</h2>
+                <div className="flex flex-wrap justify-between items-center gap-3">
+                  <h2 className="text-2xl font-bold">Competition rosters</h2>
+                  <span className="text-sm text-gray-400">
+                    {registrations.length} registered players
+                  </span>
+                </div>
+
                 {registrations.length === 0 ? (
                   <p className="text-gray-400 mt-4">
                     No player registrations are visible yet.
                   </p>
                 ) : (
-                  <div className="space-y-3 mt-5">
-                    {registrations.map(registration => (
-                      <div
-                        key={registration.id}
-                        className="bg-gray-800 border border-gray-700 rounded-lg p-4 flex flex-wrap justify-between items-center gap-3"
-                      >
-                        <div>
-                          <p className="font-semibold">{playerName(registration.player_id)}</p>
-                          <p className="text-sm text-gray-400">{teamName(registration.team_id)}</p>
+                  <div className="space-y-6 mt-5">
+                    {registeredTeams.map(team => {
+                      const teamRegistrations = registrations.filter(
+                        registration => registration.team_id === team.id
+                      )
+
+                      return (
+                        <div key={team.id} className="bg-gray-800 rounded-xl p-4">
+                          <div className="flex flex-wrap justify-between gap-2 items-center mb-4">
+                            <h3 className="font-bold text-lg">{team.name}</h3>
+                            <span className="text-sm text-gray-400">
+                              {teamRegistrations.length}/{competition.roster_cap} players
+                            </span>
+                          </div>
+
+                          {teamRegistrations.length === 0 ? (
+                            <p className="text-sm text-gray-500">No players registered.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {teamRegistrations.map(registration => (
+                                <div
+                                  key={registration.id}
+                                  className="bg-gray-900 border border-gray-700 rounded-lg p-3 flex flex-wrap justify-between items-center gap-3"
+                                >
+                                  <div>
+                                    <p className="font-semibold">
+                                      {playerName(registration.player_id)}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      {profiles.find(profile => profile.id === registration.player_id)?.position || 'Position not set'}
+                                    </p>
+                                  </div>
+
+                                  {isAdmin && (
+                                    <button
+                                      onClick={() => removePlayer(registration.id)}
+                                      disabled={saving}
+                                      className="bg-red-600 hover:bg-red-700 disabled:opacity-50 px-4 py-2 rounded-lg text-sm font-semibold"
+                                    >
+                                      Remove player
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        {isAdmin && (
-                          <button
-                            onClick={() => removePlayer(registration.id)}
-                            disabled={saving}
-                            className="bg-red-600 hover:bg-red-700 disabled:opacity-50 px-4 py-2 rounded-lg text-sm font-semibold"
-                          >
-                            Remove player
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </section>
@@ -1336,11 +1576,7 @@ function CompetitionPageContent() {
                       <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-center">
                         <div className="flex flex-col md:flex-row items-center gap-3 min-w-0">
                           {homeBadge ? (
-                            <img
-                              src={homeBadge}
-                              alt=""
-                              className="w-10 h-10 object-contain"
-                            />
+                            <img src={homeBadge} alt="" className="w-10 h-10 object-contain" />
                           ) : (
                             <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center font-bold">
                               {teamName(fixture.home_team_id).slice(0, 2)}
@@ -1366,11 +1602,7 @@ function CompetitionPageContent() {
                             {teamName(fixture.away_team_id)}
                           </span>
                           {awayBadge ? (
-                            <img
-                              src={awayBadge}
-                              alt=""
-                              className="w-10 h-10 object-contain"
-                            />
+                            <img src={awayBadge} alt="" className="w-10 h-10 object-contain" />
                           ) : (
                             <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center font-bold">
                               {teamName(fixture.away_team_id).slice(0, 2)}
