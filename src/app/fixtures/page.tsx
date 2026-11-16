@@ -1,4 +1,3 @@
-
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -99,7 +98,7 @@ export default function FixturesPage() {
           </p>
           <h1 className="text-4xl font-bold mt-2">Fixtures & results</h1>
           <p className="text-gray-400 mt-2">
-            View scheduled matches and completed fixtures.
+            View scheduled matches, completed fixtures and match discussions.
           </p>
         </div>
 
@@ -172,9 +171,18 @@ export default function FixturesPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap justify-between gap-2 mt-5 border-t border-white/10 pt-4 text-xs text-gray-400">
-                  <span>{new Date(fixture.kickoff_at).toLocaleString('en-AU')}</span>
-                  <span>{fixture.status.toUpperCase()}</span>
+                <div className="flex flex-wrap justify-between items-center gap-3 mt-5 border-t border-white/10 pt-4">
+                  <div className="text-xs text-gray-400">
+                    <p>{new Date(fixture.kickoff_at).toLocaleString('en-AU')}</p>
+                    <p className="mt-1">{fixture.status.toUpperCase()}</p>
+                  </div>
+
+                  <Link
+                    href={`/fixtures/${fixture.id}`}
+                    className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white transition"
+                  >
+                    Match Thread →
+                  </Link>
                 </div>
               </article>
             ))}
