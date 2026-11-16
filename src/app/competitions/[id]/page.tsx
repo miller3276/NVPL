@@ -1,4 +1,3 @@
-
 'use client'
 
 import { Suspense, useCallback, useEffect, useState } from 'react'
@@ -117,15 +116,11 @@ function CompetitionPageContent() {
   const [userId, setUserId] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
 
-  // Club registration selection
   const [selectedTeam, setSelectedTeam] = useState('')
-
-  // Player registration selections
   const [selectedPlayerTeam, setSelectedPlayerTeam] = useState('')
   const [selectedPlayer, setSelectedPlayer] = useState('')
   const [adminPlayerMode, setAdminPlayerMode] = useState(false)
 
-  // Admin roster cap
   const [rosterCapInput, setRosterCapInput] = useState('15')
 
   const [fixtureFilter, setFixtureFilter] = useState('all')
@@ -184,7 +179,7 @@ function CompetitionPageContent() {
         const managedIds = (staffData || [])
           .filter((staff: { team_id: string; role: string }) =>
             ['manager', 'owner', 'admin', 'club_manager'].includes(
-              (staff.role || '').toLowerCase()
+              (staff.role || '').trim().toLowerCase()
             )
           )
           .map((staff: { team_id: string }) => staff.team_id)
@@ -754,7 +749,7 @@ function CompetitionPageContent() {
           ← All competitions
         </Link>
 
-        {/* Competition header */}
+        {/* COMPETITION HEADER */}
         <section
           className="relative overflow-hidden bg-gray-900 border border-gray-800 rounded-2xl mt-6"
           style={
@@ -814,7 +809,7 @@ function CompetitionPageContent() {
           </div>
         </section>
 
-        {/* Navigation */}
+        {/* NAVIGATION */}
         <div className="flex gap-2 overflow-x-auto mt-8 border-b border-gray-800 pb-3">
           {tabs.map(tab => (
             <button
@@ -1004,6 +999,132 @@ function CompetitionPageContent() {
               </section>
             )}
 
+            {/* NEXUS-STYLE TEAM REGISTRATION */}
+            {userId && (
+              <section className="mt-8 bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-gray-800">
+                  <div className="flex flex-wrap justify-between items-center gap-3">
+                    <div>
+                      <h2 className="text-2xl font-black">Team Registration</h2>
+                      <p className="text-gray-400 text-sm mt-2">
+                        Enter your club into {competition.name}.
+                      </p>
+                    </div>
+
+                    <span
+                      className={`px-4 py-2 rounded-full text-sm font-bold ${
+                        competition.registrations_open
+                          ? 'bg-green-900/50 text-green-400'
+                          : 'bg-red-900/50 text-red-400'
+                      }`}
+                    >
+                      {competition.registrations_open
+                        ? 'REGISTRATION OPEN'
+                        : 'REGISTRATION CLOSED'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-6">
+                  {myTeams.length === 0 ? (
+                    <div className="bg-gray-800 rounded-xl p-6 text-center">
+                      <h3 className="font-bold text-lg">No managed clubs found</h3>
+                      <p className="text-gray-400 text-sm mt-2">
+                        You need to be a manager or owner of a club to register it for this competition.
+                      </p>
+                      <Link
+                        href="/clubs"
+                        className="inline-block mt-4 bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-semibold"
+                      >
+                        View clubs
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {myTeams.map(team => {
+                        const alreadyRegistered = registeredTeams.some(
+                          registered => registered.id === team.id
+                        )
+
+                        return (
+                          <div
+                            key={team.id}
+                            className="bg-gray-800 border border-gray-700 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                          >
+                            <div className="flex items-center gap-4">
+                              {team.badge_url ? (
+                                <img
+                                  src={team.badge_url}
+                                  alt={`${team.name} badge`}
+                                  className="w-14 h-14 object-contain"
+                                />
+                              ) : (
+                                <div className="w-14 h-14 bg-gray-700 rounded-xl flex items-center justify-center font-black text-lg">
+                                  {team.abbreviation || team.name.slice(0, 2)}
+                                </div>
+                              )}
+
+                              <div>
+                                <h3 className="font-bold text-lg">{team.name}</h3>
+                                <p className="text-sm text-gray-400 mt-1">
+                                  {teamPlayerCount(team.id)} / {competition.roster_cap} players registered
+                                </p>
+                              </div>
+                            </div>
+
+                            {alreadyRegistered ? (
+                              <span className="bg-green-900/50 text-green-400 px-5 py-3 rounded-lg font-bold text-sm text-center">
+                                ✓ TEAM REGISTERED
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => setSelectedTeam(team.id)}
+                                disabled={saving || !competition.registrations_open}
+                                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-bold"
+                              >
+                                Select club
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+
+                      {selectedTeam &&
+                        !registeredTeams.some(team => team.id === selectedTeam) && (
+                          <div className="bg-blue-950/40 border border-blue-800 rounded-xl p-5">
+                            <p className="font-bold">
+                              Confirm entry:{' '}
+                              {myTeams.find(team => team.id === selectedTeam)?.name}
+                            </p>
+                            <p className="text-gray-400 text-sm mt-2">
+                              Your club will be entered into this competition. You can then register individual players.
+                            </p>
+
+                            <div className="flex flex-wrap gap-3 mt-4">
+                              <button
+                                onClick={registerTeam}
+                                disabled={saving || !competition.registrations_open}
+                                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-bold"
+                              >
+                                {saving ? 'Registering...' : 'Confirm team registration'}
+                              </button>
+
+                              <button
+                                onClick={() => setSelectedTeam('')}
+                                disabled={saving}
+                                className="bg-gray-700 hover:bg-gray-600 px-6 py-3 rounded-lg font-semibold"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             {/* ADMIN REGISTRATION AND ROSTER SETTINGS */}
             {isAdmin && (
               <section className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6">
@@ -1060,39 +1181,6 @@ function CompetitionPageContent() {
                       Update roster cap
                     </button>
                   </div>
-                </div>
-              </section>
-            )}
-
-            {/* MANAGER CLUB REGISTRATION */}
-            {!isAdmin && competition.registrations_open && myTeams.length > 0 && (
-              <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 className="text-2xl font-bold">Club registration</h2>
-                <p className="text-gray-400 mt-2">
-                  Register your club for this competition.
-                </p>
-
-                <div className="flex flex-col md:flex-row gap-3 mt-5">
-                  <select
-                    value={selectedTeam}
-                    onChange={event => setSelectedTeam(event.target.value)}
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
-                  >
-                    <option value="">Select your club</option>
-                    {myTeams.map(team => (
-                      <option key={team.id} value={team.id}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-
-                  <button
-                    onClick={registerTeam}
-                    disabled={saving || !selectedTeam}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-semibold"
-                  >
-                    Register club
-                  </button>
                 </div>
               </section>
             )}
