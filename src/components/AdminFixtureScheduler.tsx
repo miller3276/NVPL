@@ -40,6 +40,20 @@ const TIMEZONES = [
   { label: 'Los Angeles / Pacific USA', value: 'America/Los_Angeles' },
 ]
 
+function getRegionTimezone(region: string) {
+  const normalized = region.trim().toUpperCase()
+
+  if (normalized === 'EU' || normalized.includes('EUROPE')) {
+    return 'Europe/London'
+  }
+
+  if (normalized === 'NA' || normalized.includes('NORTH AMERICA')) {
+    return 'America/New_York'
+  }
+
+  return 'Australia/Brisbane'
+}
+
 function getZonedParts(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -81,6 +95,7 @@ function zonedInputToUtc(value: string, timeZone: string) {
   if (!match) throw new Error('Please enter a valid kickoff time.')
 
   const [, y, mo, d, h, mi] = match
+
   const target = Date.UTC(
     Number(y),
     Number(mo) - 1,
@@ -119,7 +134,7 @@ function zonedInputToUtc(value: string, timeZone: string) {
     check.minute !== Number(mi)
   ) {
     throw new Error(
-      'That local time is invalid or ambiguous because of daylight saving time. Please choose another kickoff time.'
+      'That local time is invalid or ambiguous because of daylight saving time. Choose another kickoff time.'
     )
   }
 
@@ -147,7 +162,7 @@ export default function AdminFixtureScheduler({
   async function loadFixtures() {
     const { data: competition, error: competitionError } = await supabase
       .from('competitions')
-      .select('schedule_timezone')
+      .select('region, schedule_timezone, schedule_timezone_customized')
       .eq('id', competitionId)
       .single()
 
@@ -156,8 +171,29 @@ export default function AdminFixtureScheduler({
       return
     }
 
-    const loadedTimezone =
-      competition?.schedule_timezone || 'Australia/Brisbane'
+    const automaticTimezone = getRegionTimezone(
+      competition.region || 'OCE'
+    )
+
+    let loadedTimezone = competition.schedule_timezone
+
+    // Automatically choose the region's timezone unless an admin
+    // has explicitly saved a custom timezone.
+    if (!competition.schedule_timezone_customized) {
+      loadedTimezone = automaticTimezone
+
+      const { error: updateError } = await supabase
+        .from('competitions')
+        .update({ schedule_timezone: automaticTimezone })
+        .eq('id', competitionId)
+
+      if (updateError) {
+        setError(updateError.message)
+        return
+      }
+    }
+
+    loadedTimezone = loadedTimezone || automaticTimezone
 
     setTimezone(loadedTimezone)
     setSavedTimezone(loadedTimezone)
@@ -218,7 +254,10 @@ export default function AdminFixtureScheduler({
 
     const { error } = await supabase
       .from('competitions')
-      .update({ schedule_timezone: timezone })
+      .update({
+        schedule_timezone: timezone,
+        schedule_timezone_customized: true,
+      })
       .eq('id', competitionId)
 
     setSavingTimezone(false)
@@ -229,7 +268,7 @@ export default function AdminFixtureScheduler({
     }
 
     setSavedTimezone(timezone)
-    setMessage('Competition timezone saved.')
+    setMessage('Custom competition timezone saved.')
   }
 
   async function generateSchedule() {
@@ -239,7 +278,10 @@ export default function AdminFixtureScheduler({
 
     const { error: timezoneError } = await supabase
       .from('competitions')
-      .update({ schedule_timezone: timezone })
+      .update({
+        schedule_timezone: timezone,
+        schedule_timezone_customized: true,
+      })
       .eq('id', competitionId)
 
     if (timezoneError) {
@@ -369,7 +411,7 @@ export default function AdminFixtureScheduler({
           </button>
 
           <span className="text-xs text-gray-500">
-            All competition kickoff times use this timezone.
+            Automatically selected from the competition region unless customised.
           </span>
         </div>
       </div>
