@@ -60,6 +60,7 @@ export default function NVPLBadges({
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [removingBadgeId, setRemovingBadgeId] = useState<string | null>(null)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -125,7 +126,10 @@ export default function NVPLBadges({
     const { data: adminResult, error: adminError } =
       await supabase.rpc('nvpl_can_manage_competitions')
 
-    if (adminError || !adminResult) return
+    if (adminError || !adminResult) {
+      setIsAdmin(false)
+      return
+    }
 
     setIsAdmin(true)
 
@@ -251,6 +255,34 @@ export default function NVPLBadges({
     setSaving(false)
   }
 
+  async function removeAward(badge: Award) {
+    const badgeName = badge.definition?.name || badge.badge_code
+
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently remove "${badgeName}"? This will also remove it from the recipient's achievements.`
+    )
+
+    if (!confirmed) return
+
+    setRemovingBadgeId(badge.id)
+    setError('')
+    setMessage('')
+
+    const { error: removeError } = await supabase.rpc(
+      'nvpl_admin_remove_badge_award',
+      { p_award_id: badge.id }
+    )
+
+    if (removeError) {
+      setError(removeError.message)
+    } else {
+      setBadges(current => current.filter(item => item.id !== badge.id))
+      setMessage(`${badgeName} has been removed successfully.`)
+    }
+
+    setRemovingBadgeId(null)
+  }
+
   function tierStyle(tier?: string) {
     switch (tier) {
       case 'Diamond':
@@ -337,6 +369,18 @@ export default function NVPLBadges({
                   Awarded {new Date(badge.awarded_at).toLocaleDateString()}
                 </p>
               )}
+
+              {mode === 'competition' && isAdmin && (
+                <button
+                  onClick={() => removeAward(badge)}
+                  disabled={removingBadgeId === badge.id}
+                  className="mt-4 w-full rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 px-3 py-2 text-sm font-bold text-red-300"
+                >
+                  {removingBadgeId === badge.id
+                    ? 'Removing...'
+                    : 'Remove Badge'}
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -355,7 +399,8 @@ export default function NVPLBadges({
           <h3 className="text-lg font-bold">Admin Badge Management</h3>
 
           <p className="text-sm text-gray-400 mt-1">
-            Create awards for review, then approve them to publish.
+            Create awards for review, approve them to publish, or remove
+            an existing award.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
