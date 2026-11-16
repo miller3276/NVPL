@@ -160,46 +160,64 @@ function CompetitionPageContent() {
       setCompetition(competitionRow)
       setRosterCapInput(String(competitionRow.roster_cap ?? 15))
 
-      let admin = false
-
       if (user) {
         const { data: adminData } = await supabase.rpc(
           'nvpl_can_manage_competitions'
         )
 
-        admin = adminData === true
+        const admin = adminData === true
         setIsAdmin(admin)
 
-        // Every club attached to this user's club_staff account is shown.
-        // Do not filter by role names: installations may use different role labels.
-        const { data: staffData, error: staffError } = await supabase
-          .from('club_staff')
-          .select('team_id')
-          .eq('user_id', user.id)
+        // Load clubs where the user is an owner OR a staff member.
+        const [
+          { data: staffData, error: staffError },
+          { data: ownedTeams, error: ownerError }
+        ] = await Promise.all([
+          supabase
+            .from('club_staff')
+            .select('team_id')
+            .eq('user_id', user.id),
+
+          supabase
+            .from('teams')
+            .select('id')
+            .eq('owner_id', user.id)
+        ])
 
         if (staffError) {
-          console.error('Could not load managed clubs:', staffError.message)
-          setMyTeams([])
-        } else {
-          const managedIds = [
-            ...new Set(
-              (staffData || []).map(
-                (staff: { team_id: string }) => staff.team_id
-              )
+          console.error('Could not load club staff:', staffError.message)
+        }
+
+        if (ownerError) {
+          console.error('Could not load owned clubs:', ownerError.message)
+        }
+
+        const managedIds = [
+          ...new Set([
+            ...(staffData || []).map(
+              (staff: { team_id: string }) => staff.team_id
+            ),
+            ...(ownedTeams || []).map(
+              (team: { id: string }) => team.id
             )
-          ]
+          ])
+        ]
 
-          if (managedIds.length) {
-            const { data: myTeamData } = await supabase
-              .from('teams')
-              .select('id, name, abbreviation, badge_url')
-              .in('id', managedIds)
-              .order('name')
+        if (managedIds.length > 0) {
+          const { data: myTeamData, error: myTeamError } = await supabase
+            .from('teams')
+            .select('id, name, abbreviation, badge_url')
+            .in('id', managedIds)
+            .order('name')
 
-            setMyTeams((myTeamData || []) as Team[])
-          } else {
+          if (myTeamError) {
+            console.error('Could not load managed clubs:', myTeamError.message)
             setMyTeams([])
+          } else {
+            setMyTeams((myTeamData || []) as Team[])
           }
+        } else {
+          setMyTeams([])
         }
       } else {
         setIsAdmin(false)
@@ -1012,7 +1030,7 @@ function CompetitionPageContent() {
                     <div className="bg-gray-800 rounded-xl p-6 text-center">
                       <h3 className="font-bold text-lg">No clubs linked to your account</h3>
                       <p className="text-gray-400 text-sm mt-2">
-                        You need to be listed in your club's staff/manager settings to register it.
+                        You need to own a club or be listed in its staff/manager settings to register it.
                       </p>
                       <Link
                         href="/clubs"
