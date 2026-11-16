@@ -15,16 +15,27 @@ type Notification = {
   created_at: string
 }
 
+type Invitation = {
+  id: string
+  team_id: string
+  created_at: string
+  teamName: string
+}
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [invitations, setInvitations] = useState<Invitation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [invitationError, setInvitationError] = useState('')
   const [unreadCount, setUnreadCount] = useState(0)
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
   const [updating, setUpdating] = useState(false)
+  const [respondingTo, setRespondingTo] = useState<string | null>(null)
 
   const loadNotifications = useCallback(async () => {
     setError('')
+    setInvitationError('')
 
     try {
       const {
@@ -37,6 +48,7 @@ export default function NotificationsPage() {
       if (!user) {
         setError('Please sign in to view your notifications.')
         setNotifications([])
+        setInvitations([])
         return
       }
 
@@ -51,9 +63,63 @@ export default function NotificationsPage() {
       if (queryError) throw queryError
 
       const results = data || []
-
       setNotifications(results)
       setUnreadCount(results.filter((item) => !item.is_read).length)
+
+      // Find the signed-in player's profile.
+      const { data: profile, error: profileError } = await supabase
+        .from('player_profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (profileError) throw profileError
+
+      if (!profile) {
+        setInvitations([])
+        return
+      }
+
+      // Load pending invitations for this player.
+      const { data: invitationData, error: invitationQueryError } =
+        await supabase
+          .from('club_invitations')
+          .select('id, team_id, created_at')
+          .eq('player_id', profile.id)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false })
+
+      if (invitationQueryError) throw invitationQueryError
+
+      const pendingInvitations = invitationData || []
+
+      if (pendingInvitations.length === 0) {
+        setInvitations([])
+        return
+      }
+
+      // Load the club names separately.
+      const teamIds = [
+        ...new Set(pendingInvitations.map((invitation) => invitation.team_id)),
+      ]
+
+      const { data: teams, error: teamsError } = await supabase
+        .from('teams')
+        .select('id, name')
+        .in('id', teamIds)
+
+      if (teamsError) throw teamsError
+
+      const teamNames = new Map(
+        (teams || []).map((team) => [team.id, team.name])
+      )
+
+      setInvitations(
+        pendingInvitations.map((invitation) => ({
+          ...invitation,
+          teamName: teamNames.get(invitation.team_id) || 'Unknown club',
+        }))
+      )
     } catch (err) {
       console.error(err)
       setError(
@@ -80,12 +146,53 @@ export default function NotificationsPage() {
         },
         () => void loadNotifications()
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'club_invitations',
+        },
+        () => void loadNotifications()
+      )
       .subscribe()
 
     return () => {
       void supabase.removeChannel(channel)
     }
   }, [loadNotifications])
+
+  async function respondToInvitation(
+    invitationId: string,
+    action: 'accept' | 'decline'
+  ) {
+    setRespondingTo(invitationId)
+    setInvitationError('')
+
+    try {
+      const functionName =
+        action === 'accept'
+          ? 'accept_club_invitation'
+          : 'decline_club_invitation'
+
+      const { error: rpcError } = await supabase.rpc(functionName, {
+        p_invitation_id: invitationId,
+      })
+
+      if (rpcError) throw rpcError
+
+      await loadNotifications()
+    } catch (err) {
+      console.error(err)
+      setInvitationError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to respond to this invitation.'
+      )
+    } finally {
+      setRespondingTo(null)
+    }
+  }
 
   async function markRead(id: string) {
     setUpdating(true)
@@ -147,6 +254,10 @@ export default function NotificationsPage() {
       : notifications
 
   function notificationDestination(item: Notification) {
+    if (item.link === '/invitations') {
+      return '/notifications#club-invitations'
+    }
+
     return item.link || '/notifications'
   }
 
@@ -173,7 +284,7 @@ export default function NotificationsPage() {
           </div>
 
           <button
-            onClick={loadNotifications}
+            onClick={() => void loadNotifications()}
             className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm hover:bg-white/10"
           >
             ↻ Refresh
@@ -186,6 +297,97 @@ export default function NotificationsPage() {
           </div>
         )}
 
+        {/* CLUB INVITATIONS */}
+        <section
+          id="club-invitations"
+          className="mb-8 rounded-2xl border border-blue-500/30 bg-[#111827] p-5 sm:p-6"
+        >
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black">Club Invitations</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Clubs that have invited you to join their squad.
+              </p>
+            </div>
+
+            <span className="rounded-full bg-blue-600/20 px-3 py-1 text-xs font-bold text-blue-300">
+              {invitations.length} Pending
+            </span>
+          </div>
+
+          {invitationError && (
+            <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+              {invitationError}
+            </div>
+          )}
+
+          {invitations.length === 0 ? (
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] py-10 text-center">
+              <div className="text-3xl">⚽</div>
+              <h3 className="mt-3 font-bold">No pending invitations</h3>
+              <p className="mt-2 text-sm text-gray-400">
+                When a club invites you, it will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {invitations.map((invitation) => (
+                <article
+                  key={invitation.id}
+                  className="rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:p-5"
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-blue-400">
+                        Club invitation
+                      </p>
+                      <h3 className="mt-1 text-lg font-black">
+                        {invitation.teamName}
+                      </h3>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Received{' '}
+                        {new Date(invitation.created_at).toLocaleDateString(
+                          'en-AU',
+                          {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          }
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() =>
+                          void respondToInvitation(invitation.id, 'accept')
+                        }
+                        disabled={respondingTo !== null}
+                        className="flex-1 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
+                      >
+                        {respondingTo === invitation.id
+                          ? 'Processing...'
+                          : 'Accept'}
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          void respondToInvitation(invitation.id, 'decline')
+                        }
+                        disabled={respondingTo !== null}
+                        className="flex-1 rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-gray-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* NOTIFICATION COUNTS */}
         <section className="mb-6 grid grid-cols-2 gap-4">
           <div className="rounded-2xl border border-white/10 bg-[#111827] p-5">
             <p className="text-sm text-gray-400">Total notifications</p>
@@ -202,6 +404,7 @@ export default function NotificationsPage() {
           </div>
         </section>
 
+        {/* NOTIFICATIONS LIST */}
         <section className="rounded-2xl border border-white/10 bg-[#111827] p-5 sm:p-6">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
             <div className="flex gap-2">

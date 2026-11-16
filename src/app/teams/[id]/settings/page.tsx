@@ -40,6 +40,9 @@ function TeamSettingsContent() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
+  const [inviteUsername, setInviteUsername] = useState('')
+  const [inviting, setInviting] = useState(false)
+
   useEffect(() => {
     async function loadTeam() {
       setLoading(true)
@@ -95,6 +98,39 @@ function TeamSettingsContent() {
 
     loadTeam()
   }, [teamId])
+
+  async function invitePlayer() {
+    const username = inviteUsername.trim().replace(/^@/, '')
+
+    if (!username) {
+      setError('Enter the player’s NVPL username.')
+      setMessage('')
+      return
+    }
+
+    if (!canManage) return
+
+    setInviting(true)
+    setError('')
+    setMessage('')
+
+    const { error: inviteError } = await supabase.rpc(
+      'send_club_invitation',
+      {
+        p_team_id: teamId,
+        p_username: username,
+      }
+    )
+
+    if (inviteError) {
+      setError(inviteError.message)
+    } else {
+      setMessage(`Club invitation sent to @${username}.`)
+      setInviteUsername('')
+    }
+
+    setInviting(false)
+  }
 
   async function searchClubs() {
     setError('')
@@ -257,7 +293,7 @@ function TeamSettingsContent() {
           </h1>
 
           <p className="mt-2 text-gray-400">
-            Manage your team and connect its EA FC Pro Clubs account.
+            Manage your team, invite players and connect its EA FC account.
           </p>
         </div>
 
@@ -273,6 +309,62 @@ function TeamSettingsContent() {
           </div>
         )}
 
+        {/* CLUB INVITATIONS */}
+        <section className="mb-7 rounded-2xl border border-white/10 bg-[#101722] p-6">
+          <div className="mb-5">
+            <p className="text-xs font-bold uppercase tracking-widest text-blue-400">
+              Squad recruitment
+            </p>
+            <h2 className="mt-2 text-xl font-bold">
+              Invite Players
+            </h2>
+            <p className="mt-2 text-sm text-gray-400">
+              Search using a player's NVPL username and send them a club invitation.
+            </p>
+          </div>
+
+          {canManage ? (
+            <>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <input
+                  value={inviteUsername}
+                  onChange={(event) => setInviteUsername(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') invitePlayer()
+                  }}
+                  placeholder="Enter NVPL username"
+                  maxLength={40}
+                  className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#080b12] px-4 py-3 text-white outline-none placeholder:text-gray-600 focus:border-blue-500"
+                />
+
+                <button
+                  onClick={invitePlayer}
+                  disabled={inviting || !inviteUsername.trim()}
+                  className="rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {inviting ? 'Sending...' : 'Send Invitation'}
+                </button>
+              </div>
+
+              <p className="mt-3 text-xs text-gray-500">
+                Players can receive invitations from multiple clubs, but can only belong to one active club at a time.
+              </p>
+
+              <Link
+                href="/roster"
+                className="mt-5 inline-block text-sm font-semibold text-blue-400 hover:text-blue-300"
+              >
+                Manage your club roster →
+              </Link>
+            </>
+          ) : (
+            <p className="text-sm text-gray-500">
+              Only the club owner, registered staff or an NVPL admin can invite players.
+            </p>
+          )}
+        </section>
+
+        {/* EA FC CLUB CONNECTION */}
         <section className="rounded-2xl border border-white/10 bg-[#101722] p-6">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
