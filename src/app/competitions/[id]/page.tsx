@@ -1,3 +1,4 @@
+
 'use client'
 
 import { Suspense, useCallback, useEffect, useState } from 'react'
@@ -6,6 +7,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import CompetitionTeamOfWeek from '@/components/CompetitionTeamOfWeek'
 import NVPLBadges from '@/components/NVPLBadges'
+import AdminFixtureScheduler from '@/components/AdminFixtureScheduler'
 
 type Competition = {
   id: string
@@ -86,12 +88,7 @@ type CompetitionRule = {
   display_order: number
 }
 
-type Tab =
-  | 'overview'
-  | 'rules'
-  | 'fixtures'
-  | 'standings'
-  | 'totw'
+type Tab = 'overview' | 'rules' | 'fixtures' | 'standings' | 'totw'
 
 function CompetitionPageContent() {
   const params = useParams()
@@ -193,7 +190,6 @@ function CompetitionPageContent() {
         setMyTeams([])
       }
 
-      // Competition rules
       const { data: ruleData } = await supabase
         .from('nvpl_competition_rules')
         .select('id, competition_id, title, content, display_order')
@@ -202,7 +198,6 @@ function CompetitionPageContent() {
 
       setRules((ruleData || []) as CompetitionRule[])
 
-      // Registered teams
       const { data: teamRegistrations } = await supabase
         .from('competition_team_registrations')
         .select('team_id')
@@ -225,7 +220,6 @@ function CompetitionPageContent() {
         setRegisteredTeams([])
       }
 
-      // Player registrations
       if (user) {
         const { data: registrationData } = await supabase
           .from('competition_registrations')
@@ -253,7 +247,6 @@ function CompetitionPageContent() {
         setProfiles([])
       }
 
-      // Full standings
       const { data: standingData } = await supabase
         .from('nvpl_league_standings')
         .select(
@@ -266,7 +259,6 @@ function CompetitionPageContent() {
 
       setStandings((standingData || []) as Standing[])
 
-      // All fixtures
       const { data: fixtureData } = await supabase
         .from('nvpl_fixtures')
         .select(
@@ -298,7 +290,6 @@ function CompetitionPageContent() {
         setFixtureTeams([])
       }
 
-      // Top scorers
       const { data: scorerData } = await supabase
         .from('nvpl_competition_player_statistics')
         .select(
@@ -602,7 +593,8 @@ function CompetitionPageContent() {
       (fixture.status || '').toLowerCase()
     )
   }
-    function fixtureStatus(fixture: Fixture) {
+
+  function fixtureStatus(fixture: Fixture) {
     if (isCompleted(fixture)) return 'Completed'
 
     if (new Date(fixture.kickoff_at).getTime() < Date.now()) {
@@ -677,7 +669,6 @@ function CompetitionPageContent() {
   return (
     <main className="min-h-screen bg-gray-950 text-white p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
-
         <Link
           href="/competitions"
           className="text-blue-400 hover:text-blue-300 hover:underline text-sm"
@@ -925,6 +916,17 @@ function CompetitionPageContent() {
             <section className="mt-8">
               <NVPLBadges competitionId={competition.id} />
             </section>
+
+            {/* ADMIN FIXTURE SCHEDULER */}
+            {isAdmin && (
+              <section className="mt-8">
+                <AdminFixtureScheduler
+                  competitionId={competition.id}
+                  startDate={competition.start_date || ''}
+                  endDate={competition.end_date || ''}
+                />
+              </section>
+            )}
 
             {isAdmin && (
               <section className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6">
@@ -1254,7 +1256,8 @@ function CompetitionPageContent() {
             )}
           </>
         )}
-                {/* FIXTURES AND RESULTS */}
+
+        {/* FIXTURES AND RESULTS */}
         {activeTab === 'fixtures' && (
           <section className="mt-8">
             <div className="flex flex-wrap justify-between items-center gap-4">
@@ -1540,7 +1543,6 @@ function CompetitionPageContent() {
             isAdmin={isAdmin}
           />
         )}
-
       </div>
     </main>
   )
