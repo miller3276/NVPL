@@ -7,6 +7,7 @@ const ea = new ProClubsClient({ cache: true })
 export async function GET(request: NextRequest) {
   const clubName = request.nextUrl.searchParams.get('name')?.trim()
   const platform = request.nextUrl.searchParams.get('platform') ?? 'common-gen5'
+  const searchOnly = request.nextUrl.searchParams.get('search') === '1'
 
   if (!clubName || clubName.length > 60) {
     return NextResponse.json(
@@ -35,6 +36,14 @@ export async function GET(request: NextRequest) {
         { error: 'No matching EA club found.' },
         { status: 404 }
       )
+    }
+
+    // Return matching clubs for Team Settings.
+    if (searchOnly) {
+      return NextResponse.json({
+        success: true,
+        clubs,
+      })
     }
 
     const club = clubs[0]
@@ -76,7 +85,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         error: 'EA FC data could not be retrieved.',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        details:
+          error instanceof Error
+            ? error.message
+            : 'Unknown error',
       },
       { status: 502 }
     )
