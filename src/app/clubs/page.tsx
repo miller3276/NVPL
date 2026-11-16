@@ -1,4 +1,3 @@
-
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -149,9 +148,10 @@ export default function ClubsPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredClubs.map(club => (
-              <div
+              <Link
                 key={club.id}
-                className="rounded-2xl border border-[#263957] bg-[#111c30] p-6 hover:border-blue-500/70 transition"
+                href={`/teams/${club.id}`}
+                className="block rounded-2xl border border-[#263957] bg-[#111c30] p-6 hover:border-blue-500 hover:bg-[#152238] transition focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <div className="flex items-center gap-4">
                   {club.badge_url ? (
@@ -191,12 +191,16 @@ export default function ClubsPage() {
                   {club.description || 'No club description available.'}
                 </p>
 
-                <div className="border-t border-[#263957] mt-5 pt-4">
+                <div className="border-t border-[#263957] mt-5 pt-4 flex items-center justify-between">
                   <p className="text-xs text-gray-500">
                     Registered {new Date(club.created_at).toLocaleDateString()}
                   </p>
+
+                  <span className="text-sm font-bold text-blue-400">
+                    View Club →
+                  </span>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
