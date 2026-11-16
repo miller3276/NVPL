@@ -1,3 +1,4 @@
+
 import { NextRequest, NextResponse } from 'next/server'
 import { ProClubsClient } from 'proclubs-sdk'
 
@@ -11,6 +12,7 @@ type MatchRecord = {
   matchId?: string | number
   timestamp?: number
   clubs?: Record<string, unknown>
+  players?: Record<string, Record<string, Record<string, unknown>>>
 }
 
 function validClubId(value: string | null) {
@@ -38,6 +40,68 @@ export async function GET(request: NextRequest) {
   const selectedPlatform = platform as EAPlatform
 
   try {
+    // DISCOVER PLAYERS FROM RECENT CLUB MATCHES
+    if (mode === 'clubPlayers') {
+      const clubId = validClubId(params.get('clubId'))
+
+      if (!clubId) {
+        return NextResponse.json(
+          { error: 'A valid EA club ID is required.' },
+          { status: 400 }
+        )
+      }
+
+      const matches = await ea.matches.list({
+        clubId,
+        platform: selectedPlatform,
+        type: 'leagueMatch',
+        limit: 20,
+      })
+
+      const discovered = new Map<
+        string,
+        {
+          eaPlayerId: string
+          name: string
+          position: string
+          matchesSeen: number
+        }
+      >()
+
+      for (const match of (matches || []) as unknown as MatchRecord[]) {
+        const clubPlayers = match.players?.[String(clubId)]
+
+        if (!clubPlayers) continue
+
+        for (const [eaPlayerId, stats] of Object.entries(clubPlayers)) {
+          const name = String(stats.playername || '').trim()
+
+          if (!name) continue
+
+          const existing = discovered.get(eaPlayerId)
+
+          if (existing) {
+            existing.matchesSeen += 1
+          } else {
+            discovered.set(eaPlayerId, {
+              eaPlayerId,
+              name,
+              position: String(stats.pos || ''),
+              matchesSeen: 1,
+            })
+          }
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        players: Array.from(discovered.values()).sort(
+          (a, b) => a.name.localeCompare(b.name)
+        ),
+        matchesChecked: matches?.length || 0,
+      })
+    }
+
     // AUTOMATIC FIXTURE MATCH SEARCH
     if (mode === 'fixtureMatches') {
       const homeClubId = validClubId(params.get('homeClubId'))
@@ -77,19 +141,16 @@ export async function GET(request: NextRequest) {
         ...(awayHistory || []),
       ] as unknown as MatchRecord[]
 
-      // Remove duplicate matches.
       const uniqueMatches = new Map<string, MatchRecord>()
 
       for (const match of combined) {
         if (!match.matchId || !match.clubs) continue
-
         uniqueMatches.set(String(match.matchId), match)
       }
 
-      // Only return games containing BOTH linked EA clubs.
       const matchingMatches = Array.from(uniqueMatches.values())
         .filter(match => {
-          const clubIds = Object.keys(match.clubs || {}).map(String)
+          const clubIds = Object.keys(match.clubs || {})
 
           return (
             clubIds.includes(String(homeClubId)) &&
@@ -129,7 +190,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Return matching clubs for Team Settings.
     if (params.get('search') === '1') {
       return NextResponse.json({
         success: true,
@@ -137,7 +197,6 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // EXISTING CLUB DATA AND STATISTICS
     const club = clubs[0]
 
     const [info, overallStats, members, matches] =
