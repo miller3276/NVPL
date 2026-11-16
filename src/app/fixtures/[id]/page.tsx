@@ -42,6 +42,32 @@ type RescheduleRequest = {
   created_at: string
 }
 
+type EAClub = {
+  goals: string
+  goalsAgainst: string
+  details?: {
+    name?: string
+    clubId?: number
+  }
+}
+
+type EAMatch = {
+  matchId: string
+  timestamp: number
+  clubs: Record<string, EAClub>
+}
+
+type EAResult = {
+  id: string
+  match_id: string
+  ea_home_club_name: string
+  ea_away_club_name: string
+  home_score: number
+  away_score: number
+  created_at: string
+  submitted_by: string
+}
+
 function MatchThreadContent() {
   const params = useParams()
   const fixtureId = params.id as string
@@ -51,6 +77,7 @@ function MatchThreadContent() {
   const [competitionName, setCompetitionName] = useState('Competition')
   const [messages, setMessages] = useState<Message[]>([])
   const [requests, setRequests] = useState<RescheduleRequest[]>([])
+  const [eaResult, setEaResult] = useState<EAResult | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
 
@@ -58,6 +85,14 @@ function MatchThreadContent() {
   const [requestedDate, setRequestedDate] = useState('')
   const [reason, setReason] = useState('')
   const [reviewNote, setReviewNote] = useState('')
+
+  const [eaClubName, setEaClubName] = useState('')
+  const [eaPlatform, setEaPlatform] = useState('common-gen5')
+  const [eaMatches, setEaMatches] = useState<EAMatch[]>([])
+  const [selectedMatchId, setSelectedMatchId] = useState('')
+  const [selectedEaHomeId, setSelectedEaHomeId] = useState('')
+  const [searchingEA, setSearchingEA] = useState(false)
+  const [submittingEA, setSubmittingEA] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -94,7 +129,12 @@ function MatchThreadContent() {
     const currentFixture = fixtureResult.data as Fixture
     setFixture(currentFixture)
 
-    const [teamResult, competitionResult, threadResult] = await Promise.all([
+    const [
+      teamResult,
+      competitionResult,
+      threadResult,
+      eaResultQuery
+    ] = await Promise.all([
       supabase
         .from('teams')
         .select('id, name, abbreviation')
@@ -108,6 +148,11 @@ function MatchThreadContent() {
         .from('nvpl_match_threads')
         .select('id')
         .eq('fixture_id', fixtureId)
+        .maybeSingle(),
+      supabase
+        .from('nvpl_fixture_ea_results')
+        .select('id, match_id, ea_home_club_name, ea_away_club_name, home_score, away_score, created_at, submitted_by')
+        .eq('fixture_id', fixtureId)
         .maybeSingle()
     ])
 
@@ -119,6 +164,12 @@ function MatchThreadContent() {
 
     if (competitionResult.data?.name) {
       setCompetitionName(competitionResult.data.name)
+    }
+
+    if (eaResultQuery.data) {
+      setEaResult(eaResultQuery.data as EAResult)
+    } else {
+      setEaResult(null)
     }
 
     if (threadResult.error || !threadResult.data) {
@@ -169,6 +220,136 @@ function MatchThreadContent() {
       dateStyle: 'medium',
       timeStyle: 'short'
     })
+  }
+
+  function getMatchClubs(match: EAMatch) {
+    return Object.entries(match.clubs || {}).map(([id, club]) => ({
+      id,
+      name: club.details?.name || `EA Club ${id}`,
+      goals: Number(club.goals),
+      goalsAgainst: Number(club.goalsAgainst)
+    }))
+  }
+
+  const selectedEAMatch = eaMatches.find(
+    match => match.matchId === selectedMatchId
+  )
+
+  const selectedEAClubs = selectedEAMatch
+    ? getMatchClubs(selectedEAMatch)
+    : []
+
+  async function searchEAMatches(e: React.FormEvent) {
+    e.preventDefault()
+
+    if (!eaClubName.trim()) {
+      setError('Enter your EA club name.')
+      return
+    }
+
+    setSearchingEA(true)
+    setError('')
+    setNotice('')
+    setEaMatches([])
+    setSelectedMatchId('')
+    setSelectedEaHomeId('')
+
+    try {
+      const response = await fetch(
+        `/api/eafc?name=${encodeURIComponent(eaClubName.trim())}&platform=${encodeURIComponent(eaPlatform)}`
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not load EA matches.')
+      }
+
+      const matches = Array.isArray(data.matches)
+        ? data.matches as EAMatch[]
+        : []
+
+      if (matches.length === 0) {
+        throw new Error('No recent EA matches were found for that club.')
+      }
+
+      setEaMatches(matches)
+      setSelectedMatchId(matches[0].matchId)
+
+      const firstMatchClubs = getMatchClubs(matches[0])
+      if (firstMatchClubs.length > 0) {
+        setSelectedEaHomeId(firstMatchClubs[0].id)
+      }
+
+      setNotice(`Loaded ${matches.length} recent EA matches.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'EA search failed.')
+    } finally {
+      setSearchingEA(false)
+    }
+  }
+
+  async function submitEAResult() {
+    if (!selectedEAMatch || selectedEAClubs.length !== 2) {
+      setError('Select a valid EA match first.')
+      return
+    }
+
+    if (!selectedEaHomeId) {
+      setError('Choose which EA club represents the NVPL home team.')
+      return
+    }
+
+    const eaHome = selectedEAClubs.find(
+      club => club.id === selectedEaHomeId
+    )
+
+    const eaAway = selectedEAClubs.find(
+      club => club.id !== selectedEaHomeId
+    )
+
+    if (
+      !eaHome ||
+      !eaAway ||
+      !Number.isFinite(eaHome.goals) ||
+      !Number.isFinite(eaAway.goals)
+    ) {
+      setError('The selected EA match does not contain a valid score.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Submit this result?\n\n${teamName(fixture!.home_team_id)}: ${eaHome.goals}\n${teamName(fixture!.away_team_id)}: ${eaAway.goals}\n\nAdmins can review any disputes.`
+    )
+
+    if (!confirmed) return
+
+    setSubmittingEA(true)
+    setError('')
+    setNotice('')
+
+    const { error } = await supabase.rpc('nvpl_submit_ea_fixture_result', {
+      p_fixture_id: fixtureId,
+      p_match_id: selectedEAMatch.matchId,
+      p_ea_home_club_id: eaHome.id,
+      p_ea_away_club_id: eaAway.id,
+      p_ea_home_club_name: eaHome.name,
+      p_ea_away_club_name: eaAway.name,
+      p_home_score: eaHome.goals,
+      p_away_score: eaAway.goals,
+      p_raw_match: selectedEAMatch
+    })
+
+    if (error) {
+      setError(error.message)
+    } else {
+      setNotice('EA result submitted and the fixture score has been updated.')
+      setEaMatches([])
+      setSelectedMatchId('')
+      await loadThread()
+    }
+
+    setSubmittingEA(false)
   }
 
   async function sendMessage(e: React.FormEvent) {
@@ -339,6 +520,192 @@ function MatchThreadContent() {
               <p className="font-semibold uppercase text-sm">{fixture.status}</p>
             </div>
           </div>
+        </section>
+
+        {/* EA FC RESULT LINKING */}
+        <section className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.05] p-6 mb-6">
+          <div className="flex flex-wrap justify-between gap-3 items-center mb-4">
+            <div>
+              <p className="text-xs uppercase tracking-wider text-blue-400 font-semibold">
+                EA FC integration
+              </p>
+              <h2 className="text-xl font-bold mt-1">Link EA match</h2>
+            </div>
+
+            {eaResult && (
+              <span className="rounded-full bg-green-500/15 border border-green-500/20 px-3 py-1 text-xs font-semibold text-green-400">
+                Result submitted
+              </span>
+            )}
+          </div>
+
+          {eaResult ? (
+            <div className="rounded-xl bg-black/30 border border-white/10 p-5">
+              <p className="text-xs text-gray-500 mb-3">
+                Linked EA match · ID {eaResult.match_id}
+              </p>
+
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                <div className="text-right">
+                  <p className="font-semibold">{teamName(fixture.home_team_id)}</p>
+                  <p className="text-xs text-gray-400">{eaResult.ea_home_club_name}</p>
+                </div>
+
+                <p className="text-2xl font-bold tabular-nums">
+                  {eaResult.home_score} - {eaResult.away_score}
+                </p>
+
+                <div>
+                  <p className="font-semibold">{teamName(fixture.away_team_id)}</p>
+                  <p className="text-xs text-gray-400">{eaResult.ea_away_club_name}</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500 mt-4">
+                Submitted {formatDate(eaResult.created_at)}. Admins can review any disputes.
+              </p>
+            </div>
+          ) : fixture.status === 'completed' ? (
+            <p className="text-sm text-gray-400">
+              This fixture is already marked as completed. An EA match has not been linked.
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-gray-400 mb-5">
+                Search using either team's EA club name, select the correct match,
+                then submit the score for this NVPL fixture.
+              </p>
+
+              <form onSubmit={searchEAMatches} className="space-y-4">
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">
+                    EA club name
+                  </label>
+                  <input
+                    value={eaClubName}
+                    onChange={e => setEaClubName(e.target.value)}
+                    maxLength={60}
+                    placeholder="Enter your EA Pro Clubs name..."
+                    className="w-full rounded-lg border border-white/10 bg-[#101827] p-3 text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">
+                    EA platform
+                  </label>
+                  <select
+                    value={eaPlatform}
+                    onChange={e => setEaPlatform(e.target.value)}
+                    className="w-full rounded-lg border border-white/10 bg-[#101827] p-3 text-white"
+                  >
+                    <option value="common-gen5">PlayStation 5 / Xbox Series X|S</option>
+                    <option value="nx">Nintendo Switch</option>
+                  </select>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={searchingEA || !eaClubName.trim()}
+                  className="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-5 py-3 text-sm font-semibold"
+                >
+                  {searchingEA ? 'Searching EA...' : 'Load recent EA matches'}
+                </button>
+              </form>
+
+              {eaMatches.length > 0 && (
+                <div className="mt-6 border-t border-white/10 pt-5">
+                  <h3 className="font-semibold mb-3">Select the correct match</h3>
+
+                  <div className="space-y-3">
+                    {eaMatches.map(match => {
+                      const clubs = getMatchClubs(match)
+
+                      return (
+                        <label
+                          key={match.matchId}
+                          className={`block rounded-xl border p-4 cursor-pointer ${
+                            selectedMatchId === match.matchId
+                              ? 'border-blue-500 bg-blue-500/10'
+                              : 'border-white/10 bg-black/20'
+                          }`}
+                        >
+                          <div className="flex gap-3 items-start">
+                            <input
+                              type="radio"
+                              name="ea-match"
+                              value={match.matchId}
+                              checked={selectedMatchId === match.matchId}
+                              onChange={() => {
+                                setSelectedMatchId(match.matchId)
+                                const firstClub = getMatchClubs(match)[0]
+                                setSelectedEaHomeId(firstClub?.id || '')
+                              }}
+                              className="mt-1"
+                            />
+
+                            <div className="flex-1">
+                              <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
+                                <p className="font-semibold text-sm">
+                                  {clubs[0]?.name || 'Unknown club'}
+                                </p>
+                                <p className="font-bold text-lg tabular-nums">
+                                  {clubs[0]?.goals ?? '?'} - {clubs[1]?.goals ?? '?'}
+                                </p>
+                                <p className="font-semibold text-sm text-right">
+                                  {clubs[1]?.name || 'Unknown club'}
+                                </p>
+                              </div>
+
+                              <p className="text-xs text-gray-500 mt-2">
+                                Match ID: {match.matchId}
+                                {match.timestamp
+                                  ? ` · ${formatDate(new Date(match.timestamp * 1000).toISOString())}`
+                                  : ''}
+                              </p>
+                            </div>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+
+                  {selectedEAMatch && selectedEAClubs.length === 2 && (
+                    <div className="mt-5 rounded-xl bg-black/20 p-4">
+                      <label className="block text-sm text-gray-300 mb-2">
+                        Which EA club represents the NVPL home team?
+                      </label>
+
+                      <select
+                        value={selectedEaHomeId}
+                        onChange={e => setSelectedEaHomeId(e.target.value)}
+                        className="w-full rounded-lg border border-white/10 bg-[#101827] p-3 text-white"
+                      >
+                        {selectedEAClubs.map(club => (
+                          <option key={club.id} value={club.id}>
+                            {club.name}
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="mt-4 text-xs text-gray-400">
+                        The other EA club will be assigned to the NVPL away team.
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={submitEAResult}
+                        disabled={submittingEA}
+                        className="mt-5 w-full rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 px-5 py-3 text-sm font-semibold"
+                      >
+                        {submittingEA ? 'Submitting result...' : 'Confirm and submit EA result'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </section>
 
         {fixture.status === 'scheduled' && (
