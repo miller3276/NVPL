@@ -1,3 +1,4 @@
+
 'use client'
 
 import { Suspense, useCallback, useEffect, useState } from 'react'
@@ -105,10 +106,9 @@ function CompetitionPageContent() {
   const [fixtures, setFixtures] = useState<Fixture[]>([])
   const [topScorers, setTopScorers] = useState<TopScorer[]>([])
   const [fixtureTeams, setFixtureTeams] = useState<Team[]>([])
-
   const [rules, setRules] = useState<CompetitionRule[]>([])
-  const [activeTab, setActiveTab] = useState<Tab>('overview')
 
+  const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [ruleTitle, setRuleTitle] = useState('')
   const [ruleContent, setRuleContent] = useState('')
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
@@ -122,7 +122,6 @@ function CompetitionPageContent() {
   const [adminPlayerMode, setAdminPlayerMode] = useState(false)
 
   const [rosterCapInput, setRosterCapInput] = useState('15')
-
   const [fixtureFilter, setFixtureFilter] = useState('all')
   const [standingsView, setStandingsView] = useState('table')
 
@@ -171,29 +170,36 @@ function CompetitionPageContent() {
         admin = adminData === true
         setIsAdmin(admin)
 
-        const { data: staffData } = await supabase
+        // Every club attached to this user's club_staff account is shown.
+        // Do not filter by role names: installations may use different role labels.
+        const { data: staffData, error: staffError } = await supabase
           .from('club_staff')
-          .select('team_id, role')
+          .select('team_id')
           .eq('user_id', user.id)
 
-        const managedIds = (staffData || [])
-          .filter((staff: { team_id: string; role: string }) =>
-            ['manager', 'owner', 'admin', 'club_manager'].includes(
-              (staff.role || '').trim().toLowerCase()
-            )
-          )
-          .map((staff: { team_id: string }) => staff.team_id)
-
-        if (managedIds.length) {
-          const { data: myTeamData } = await supabase
-            .from('teams')
-            .select('id, name, abbreviation, badge_url')
-            .in('id', managedIds)
-            .order('name')
-
-          setMyTeams((myTeamData || []) as Team[])
-        } else {
+        if (staffError) {
+          console.error('Could not load managed clubs:', staffError.message)
           setMyTeams([])
+        } else {
+          const managedIds = [
+            ...new Set(
+              (staffData || []).map(
+                (staff: { team_id: string }) => staff.team_id
+              )
+            )
+          ]
+
+          if (managedIds.length) {
+            const { data: myTeamData } = await supabase
+              .from('teams')
+              .select('id, name, abbreviation, badge_url')
+              .in('id', managedIds)
+              .order('name')
+
+            setMyTeams((myTeamData || []) as Team[])
+          } else {
+            setMyTeams([])
+          }
         }
       } else {
         setIsAdmin(false)
@@ -618,6 +624,7 @@ function CompetitionPageContent() {
     return (
       registeredTeams.find(team => team.id === teamId)?.name ||
       fixtureTeams.find(team => team.id === teamId)?.name ||
+      myTeams.find(team => team.id === teamId)?.name ||
       'Club'
     )
   }
@@ -626,6 +633,7 @@ function CompetitionPageContent() {
     return (
       registeredTeams.find(team => team.id === teamId)?.badge_url ||
       fixtureTeams.find(team => team.id === teamId)?.badge_url ||
+      myTeams.find(team => team.id === teamId)?.badge_url ||
       null
     )
   }
@@ -705,17 +713,7 @@ function CompetitionPageContent() {
     return (
       <main className="min-h-screen bg-gray-950 text-white p-8">
         <div className="max-w-7xl mx-auto">
-          <div className="animate-pulse space-y-5">
-            <div className="h-5 w-40 bg-gray-800 rounded" />
-            <div className="h-64 bg-gray-900 rounded-2xl" />
-            <div className="h-12 bg-gray-900 rounded-xl" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map(item => (
-                <div key={item} className="h-24 bg-gray-900 rounded-xl" />
-              ))}
-            </div>
-          </div>
-          <p className="text-gray-400 mt-6">Loading competition...</p>
+          <p className="text-gray-400">Loading competition...</p>
         </div>
       </main>
     )
@@ -749,7 +747,6 @@ function CompetitionPageContent() {
           ← All competitions
         </Link>
 
-        {/* COMPETITION HEADER */}
         <section
           className="relative overflow-hidden bg-gray-900 border border-gray-800 rounded-2xl mt-6"
           style={
@@ -809,7 +806,6 @@ function CompetitionPageContent() {
           </div>
         </section>
 
-        {/* NAVIGATION */}
         <div className="flex gap-2 overflow-x-auto mt-8 border-b border-gray-800 pb-3">
           {tabs.map(tab => (
             <button
@@ -856,31 +852,27 @@ function CompetitionPageContent() {
                   {editingRuleId ? 'Edit rule section' : 'Add a rule section'}
                 </h3>
 
-                <div className="mt-5">
-                  <label className="block text-sm text-gray-400 mb-2">
-                    Section title
-                  </label>
-                  <input
-                    value={ruleTitle}
-                    onChange={event => setRuleTitle(event.target.value)}
-                    placeholder="e.g. Match Rules"
-                    maxLength={120}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white"
-                  />
-                </div>
+                <label className="block text-sm text-gray-400 mt-5 mb-2">
+                  Section title
+                </label>
+                <input
+                  value={ruleTitle}
+                  onChange={event => setRuleTitle(event.target.value)}
+                  placeholder="e.g. Match Rules"
+                  maxLength={120}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white"
+                />
 
-                <div className="mt-4">
-                  <label className="block text-sm text-gray-400 mb-2">
-                    Rule description
-                  </label>
-                  <textarea
-                    value={ruleContent}
-                    onChange={event => setRuleContent(event.target.value)}
-                    placeholder="Write the rules for this section..."
-                    rows={8}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white resize-y"
-                  />
-                </div>
+                <label className="block text-sm text-gray-400 mt-4 mb-2">
+                  Rule description
+                </label>
+                <textarea
+                  value={ruleContent}
+                  onChange={event => setRuleContent(event.target.value)}
+                  placeholder="Write the rules for this section..."
+                  rows={8}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white resize-y"
+                />
 
                 <div className="flex flex-wrap gap-3 mt-5">
                   <button
@@ -888,11 +880,7 @@ function CompetitionPageContent() {
                     disabled={saving || !ruleTitle.trim() || !ruleContent.trim()}
                     className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-semibold"
                   >
-                    {saving
-                      ? 'Saving...'
-                      : editingRuleId
-                        ? 'Save changes'
-                        : 'Publish rule section'}
+                    {saving ? 'Saving...' : editingRuleId ? 'Save changes' : 'Publish rule section'}
                   </button>
 
                   {editingRuleId && (
@@ -912,7 +900,7 @@ function CompetitionPageContent() {
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
                 <h3 className="text-xl font-bold">No rules published yet</h3>
                 <p className="text-gray-400 mt-2">
-                  Competition rules will appear here once they have been published.
+                  Competition rules will appear here once published.
                 </p>
               </div>
             ) : (
@@ -968,17 +956,14 @@ function CompetitionPageContent() {
                 <p className="text-gray-400 text-sm">Registered clubs</p>
                 <p className="text-3xl font-black mt-2">{registeredTeams.length}</p>
               </div>
-
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                 <p className="text-gray-400 text-sm">Registered players</p>
                 <p className="text-3xl font-black mt-2">{registrations.length}</p>
               </div>
-
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                 <p className="text-gray-400 text-sm">Matches played</p>
                 <p className="text-3xl font-black mt-2">{completedFixtures.length}</p>
               </div>
-
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                 <p className="text-gray-400 text-sm">Competition status</p>
                 <p className="text-xl font-bold mt-3 capitalize">{competition.status}</p>
@@ -999,7 +984,7 @@ function CompetitionPageContent() {
               </section>
             )}
 
-            {/* NEXUS-STYLE TEAM REGISTRATION */}
+            {/* TEAM REGISTRATION */}
             {userId && (
               <section className="mt-8 bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
                 <div className="p-6 border-b border-gray-800">
@@ -1007,10 +992,9 @@ function CompetitionPageContent() {
                     <div>
                       <h2 className="text-2xl font-black">Team Registration</h2>
                       <p className="text-gray-400 text-sm mt-2">
-                        Enter your club into {competition.name}.
+                        Register your club for {competition.name}, then update your squad.
                       </p>
                     </div>
-
                     <span
                       className={`px-4 py-2 rounded-full text-sm font-bold ${
                         competition.registrations_open
@@ -1018,9 +1002,7 @@ function CompetitionPageContent() {
                           : 'bg-red-900/50 text-red-400'
                       }`}
                     >
-                      {competition.registrations_open
-                        ? 'REGISTRATION OPEN'
-                        : 'REGISTRATION CLOSED'}
+                      {competition.registrations_open ? 'REGISTRATION OPEN' : 'REGISTRATION CLOSED'}
                     </span>
                   </div>
                 </div>
@@ -1028,9 +1010,9 @@ function CompetitionPageContent() {
                 <div className="p-6">
                   {myTeams.length === 0 ? (
                     <div className="bg-gray-800 rounded-xl p-6 text-center">
-                      <h3 className="font-bold text-lg">No managed clubs found</h3>
+                      <h3 className="font-bold text-lg">No clubs linked to your account</h3>
                       <p className="text-gray-400 text-sm mt-2">
-                        You need to be a manager or owner of a club to register it for this competition.
+                        You need to be listed in your club's staff/manager settings to register it.
                       </p>
                       <Link
                         href="/clubs"
@@ -1045,6 +1027,7 @@ function CompetitionPageContent() {
                         const alreadyRegistered = registeredTeams.some(
                           registered => registered.id === team.id
                         )
+                        const isSelected = selectedPlayerTeam === team.id
 
                         return (
                           <div
@@ -1063,26 +1046,40 @@ function CompetitionPageContent() {
                                   {team.abbreviation || team.name.slice(0, 2)}
                                 </div>
                               )}
-
                               <div>
                                 <h3 className="font-bold text-lg">{team.name}</h3>
                                 <p className="text-sm text-gray-400 mt-1">
                                   {teamPlayerCount(team.id)} / {competition.roster_cap} players registered
                                 </p>
+                                <p className={`text-xs mt-1 ${alreadyRegistered ? 'text-green-400' : 'text-yellow-400'}`}>
+                                  {alreadyRegistered ? 'Registered for this competition' : 'Not registered yet'}
+                                </p>
                               </div>
                             </div>
 
                             {alreadyRegistered ? (
-                              <span className="bg-green-900/50 text-green-400 px-5 py-3 rounded-lg font-bold text-sm text-center">
-                                ✓ TEAM REGISTERED
-                              </span>
+                              <button
+                                onClick={() => {
+                                  loadPlayers(team.id, false)
+                                  document.getElementById('team-roster-manager')?.scrollIntoView({
+                                    behavior: 'smooth'
+                                  })
+                                }}
+                                className={`px-6 py-3 rounded-lg font-bold ${
+                                  isSelected
+                                    ? 'bg-gray-700 text-white'
+                                    : 'bg-blue-600 hover:bg-blue-700'
+                                }`}
+                              >
+                                {isSelected ? 'Team Selected' : 'Update Team'}
+                              </button>
                             ) : (
                               <button
                                 onClick={() => setSelectedTeam(team.id)}
                                 disabled={saving || !competition.registrations_open}
                                 className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-bold"
                               >
-                                Select club
+                                Register Team
                               </button>
                             )}
                           </div>
@@ -1093,13 +1090,11 @@ function CompetitionPageContent() {
                         !registeredTeams.some(team => team.id === selectedTeam) && (
                           <div className="bg-blue-950/40 border border-blue-800 rounded-xl p-5">
                             <p className="font-bold">
-                              Confirm entry:{' '}
-                              {myTeams.find(team => team.id === selectedTeam)?.name}
+                              Confirm entry: {myTeams.find(team => team.id === selectedTeam)?.name}
                             </p>
                             <p className="text-gray-400 text-sm mt-2">
-                              Your club will be entered into this competition. You can then register individual players.
+                              Your club will be entered into this competition. You can then use Update Team to add players from your active squad.
                             </p>
-
                             <div className="flex flex-wrap gap-3 mt-4">
                               <button
                                 onClick={registerTeam}
@@ -1108,7 +1103,6 @@ function CompetitionPageContent() {
                               >
                                 {saving ? 'Registering...' : 'Confirm team registration'}
                               </button>
-
                               <button
                                 onClick={() => setSelectedTeam('')}
                                 disabled={saving}
@@ -1125,7 +1119,150 @@ function CompetitionPageContent() {
               </section>
             )}
 
-            {/* ADMIN REGISTRATION AND ROSTER SETTINGS */}
+            {/* UPDATE TEAM / MANAGER ROSTER */}
+            {userId && myTeams.some(team => registeredTeams.some(registered => registered.id === team.id)) && (
+              <section
+                id="team-roster-manager"
+                className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6"
+              >
+                <div className="flex flex-wrap justify-between items-center gap-3">
+                  <div>
+                    <h2 className="text-2xl font-bold">Update Team</h2>
+                    <p className="text-gray-400 mt-2">
+                      Add players from your active club squad to your competition roster.
+                    </p>
+                  </div>
+                  <span className="text-sm text-gray-400">
+                    Maximum {competition.roster_cap} players
+                  </span>
+                </div>
+
+                <div className="mt-5">
+                  <label className="block text-sm text-gray-400 mb-2">
+                    Select your registered club
+                  </label>
+                  <select
+                    value={selectedPlayerTeam}
+                    onChange={event => loadPlayers(event.target.value, false)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3"
+                  >
+                    <option value="">Select your registered club</option>
+                    {myTeams
+                      .filter(team =>
+                        registeredTeams.some(registered => registered.id === team.id)
+                      )
+                      .map(team => (
+                        <option key={team.id} value={team.id}>
+                          {team.name} ({teamPlayerCount(team.id)}/{competition.roster_cap})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {selectedPlayerTeam && (
+                  <>
+                    <div className="mt-5">
+                      <label className="block text-sm text-gray-400 mb-2">
+                        Select a player from your active squad
+                      </label>
+                      <select
+                        value={selectedPlayer}
+                        onChange={event => setSelectedPlayer(event.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3"
+                      >
+                        <option value="">Select a player</option>
+                        {players
+                          .filter(player =>
+                            !registrations.some(
+                              registration => registration.player_id === player.id
+                            )
+                          )
+                          .map(player => (
+                            <option key={player.id} value={player.id}>
+                              {player.username || player.gamertag}
+                              {player.position ? ` · ${player.position}` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 mt-5">
+                      <button
+                        onClick={registerPlayer}
+                        disabled={
+                          saving ||
+                          !selectedPlayer ||
+                          (!isAdmin && !competition.registrations_open) ||
+                          teamPlayerCount(selectedPlayerTeam) >= competition.roster_cap
+                        }
+                        className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-semibold"
+                      >
+                        {saving ? 'Adding...' : 'Add player to roster'}
+                      </button>
+
+                      <span className="text-sm text-gray-400">
+                        {teamPlayerCount(selectedPlayerTeam)} / {competition.roster_cap} players registered
+                      </span>
+                    </div>
+
+                    {!competition.registrations_open && !isAdmin && (
+                      <p className="text-yellow-400 text-sm mt-3">
+                        Player registrations are currently closed.
+                      </p>
+                    )}
+
+                    {teamPlayerCount(selectedPlayerTeam) >= competition.roster_cap && (
+                      <p className="text-yellow-400 text-sm mt-3">
+                        Your club has reached its roster cap.
+                      </p>
+                    )}
+
+                    <div className="mt-6 border-t border-gray-800 pt-5">
+                      <h3 className="font-bold text-lg mb-3">
+                        Registered players — {teamName(selectedPlayerTeam)}
+                      </h3>
+                      {registrations.filter(registration => registration.team_id === selectedPlayerTeam).length === 0 ? (
+                        <p className="text-gray-400 text-sm">No players have been added yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {registrations
+                            .filter(registration => registration.team_id === selectedPlayerTeam)
+                            .map(registration => {
+                              const player = profiles.find(profile => profile.id === registration.player_id)
+                              return (
+                                <div
+                                  key={registration.id}
+                                  className="bg-gray-800 rounded-lg p-3 flex items-center justify-between gap-3"
+                                >
+                                  <div>
+                                    <p className="font-semibold">
+                                      {player?.username || player?.gamertag || 'Player'}
+                                    </p>
+                                    <p className="text-xs text-gray-400">
+                                      {player?.position || 'Position not set'}
+                                    </p>
+                                  </div>
+                                  {isAdmin && (
+                                    <button
+                                      onClick={() => removePlayer(registration.id)}
+                                      disabled={saving}
+                                      className="bg-red-600 hover:bg-red-700 disabled:opacity-50 px-3 py-2 rounded-lg text-sm font-semibold"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              )
+                            })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+
+            {/* ADMIN CONTROLS */}
             {isAdmin && (
               <section className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6">
                 <h2 className="text-2xl font-bold">Competition administration</h2>
@@ -1149,11 +1286,7 @@ function CompetitionPageContent() {
                         : 'bg-green-600 hover:bg-green-700'
                     }`}
                   >
-                    {saving
-                      ? 'Saving...'
-                      : competition.registrations_open
-                        ? 'Close registrations'
-                        : 'Open registrations'}
+                    {saving ? 'Saving...' : competition.registrations_open ? 'Close registrations' : 'Open registrations'}
                   </button>
                 </div>
 
@@ -1161,9 +1294,8 @@ function CompetitionPageContent() {
                   <h3 className="font-bold">Club roster cap</h3>
                   <p className="text-gray-400 text-sm mt-2">
                     Current limit: {competition.roster_cap} players per club.
-                    Admins can increase or decrease this limit. Existing registrations will not be removed if the cap is lowered.
+                    Existing registrations will not be removed if the cap is lowered.
                   </p>
-
                   <div className="flex flex-col sm:flex-row gap-3 mt-4">
                     <input
                       type="number"
@@ -1185,87 +1317,17 @@ function CompetitionPageContent() {
               </section>
             )}
 
-            {/* MANAGER PLAYER REGISTRATION */}
-            {!isAdmin && competition.registrations_open && myTeams.length > 0 && (
-              <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 className="text-2xl font-bold">Register players</h2>
-                <p className="text-gray-400 mt-2">
-                  Select players individually from your club's active squad.
-                  Your club can register up to {competition.roster_cap} players.
-                </p>
-
-                <div className="flex flex-col md:flex-row gap-3 mt-5">
-                  <select
-                    value={selectedPlayerTeam}
-                    onChange={event => loadPlayers(event.target.value, false)}
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
-                  >
-                    <option value="">Select your registered club</option>
-                    {myTeams
-                      .filter(team =>
-                        registeredTeams.some(registered => registered.id === team.id)
-                      )
-                      .map(team => (
-                        <option key={team.id} value={team.id}>
-                          {team.name} ({teamPlayerCount(team.id)}/{competition.roster_cap})
-                        </option>
-                      ))}
-                  </select>
-
-                  <select
-                    value={selectedPlayer}
-                    onChange={event => setSelectedPlayer(event.target.value)}
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
-                  >
-                    <option value="">Select a player</option>
-                    {players
-                      .filter(player =>
-                        !registrations.some(registration => registration.player_id === player.id)
-                      )
-                      .map(player => (
-                        <option key={player.id} value={player.id}>
-                          {player.username || player.gamertag}
-                          {player.position ? ` · ${player.position}` : ''}
-                        </option>
-                      ))}
-                  </select>
-
-                  <button
-                    onClick={registerPlayer}
-                    disabled={
-                      saving ||
-                      !selectedPlayerTeam ||
-                      !selectedPlayer ||
-                      teamPlayerCount(selectedPlayerTeam) >= competition.roster_cap
-                    }
-                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-semibold"
-                  >
-                    Add player
-                  </button>
-                </div>
-
-                {selectedPlayerTeam && (
-                  <p className="text-sm text-gray-400 mt-4">
-                    {teamPlayerCount(selectedPlayerTeam)} / {competition.roster_cap} players registered.
-                    {teamPlayerCount(selectedPlayerTeam) >= competition.roster_cap
-                      ? ' Your club has reached its roster cap.'
-                      : ` ${competition.roster_cap - teamPlayerCount(selectedPlayerTeam)} places remaining.`}
-                  </p>
-                )}
-              </section>
-            )}
-
             {/* ADMIN PLAYER REGISTRATION */}
             {isAdmin && (
               <section className="mt-8 bg-gray-900 border border-blue-800 rounded-xl p-6">
                 <h2 className="text-2xl font-bold">Admin roster adjustments</h2>
                 <p className="text-gray-400 mt-2">
-                  Add players to any registered club. Admin additions can be made when registrations are closed and can exceed the roster cap.
+                  Add players to any registered club, including when registrations are closed or the roster cap has been reached.
                 </p>
 
                 <div className="flex flex-col md:flex-row gap-3 mt-5">
                   <select
-                    value={selectedPlayerTeam}
+                    value={adminPlayerMode ? selectedPlayerTeam : ''}
                     onChange={event => loadPlayers(event.target.value, true)}
                     className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
                   >
@@ -1278,7 +1340,7 @@ function CompetitionPageContent() {
                   </select>
 
                   <select
-                    value={selectedPlayer}
+                    value={adminPlayerMode ? selectedPlayer : ''}
                     onChange={event => setSelectedPlayer(event.target.value)}
                     className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-3"
                   >
@@ -1297,19 +1359,17 @@ function CompetitionPageContent() {
 
                   <button
                     onClick={registerPlayer}
-                    disabled={saving || !selectedPlayerTeam || !selectedPlayer}
+                    disabled={saving || !adminPlayerMode || !selectedPlayerTeam || !selectedPlayer}
                     className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-6 py-3 rounded-lg font-semibold"
                   >
                     Admin add player
                   </button>
                 </div>
 
-                {selectedPlayerTeam && (
+                {adminPlayerMode && selectedPlayerTeam && (
                   <p className="text-sm text-gray-400 mt-4">
                     {teamName(selectedPlayerTeam)}: {teamPlayerCount(selectedPlayerTeam)} / {competition.roster_cap} players.
-                    {teamPlayerCount(selectedPlayerTeam) >= competition.roster_cap
-                      ? ' The cap has been reached. Admin override is available.'
-                      : ` ${competition.roster_cap - teamPlayerCount(selectedPlayerTeam)} places remaining.`}
+                    Admin override is available.
                   </p>
                 )}
               </section>
@@ -1319,9 +1379,7 @@ function CompetitionPageContent() {
             <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
               <div className="flex justify-between items-center gap-3">
                 <h2 className="text-2xl font-bold">Registered clubs</h2>
-                <span className="text-gray-400 text-sm">
-                  {registeredTeams.length} clubs
-                </span>
+                <span className="text-gray-400 text-sm">{registeredTeams.length} clubs</span>
               </div>
 
               {registeredTeams.length === 0 ? (
@@ -1334,11 +1392,7 @@ function CompetitionPageContent() {
                       className="bg-gray-800 border border-gray-700 rounded-xl p-4 flex items-center gap-4"
                     >
                       {team.badge_url ? (
-                        <img
-                          src={team.badge_url}
-                          alt={`${team.name} badge`}
-                          className="w-12 h-12 object-contain"
-                        />
+                        <img src={team.badge_url} alt={`${team.name} badge`} className="w-12 h-12 object-contain" />
                       ) : (
                         <div className="w-12 h-12 bg-gray-700 rounded-lg flex items-center justify-center font-bold">
                           {team.abbreviation || team.name.slice(0, 2)}
@@ -1362,14 +1416,10 @@ function CompetitionPageContent() {
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <div className="flex justify-between items-center gap-3">
                   <h2 className="text-xl font-bold">Upcoming fixtures</h2>
-                  <button
-                    onClick={() => setActiveTab('fixtures')}
-                    className="text-blue-400 text-sm hover:underline"
-                  >
+                  <button onClick={() => setActiveTab('fixtures')} className="text-blue-400 text-sm hover:underline">
                     View all
                   </button>
                 </div>
-
                 {upcomingFixtures.length === 0 ? (
                   <p className="text-gray-400 mt-5">No upcoming fixtures have been scheduled.</p>
                 ) : (
@@ -1394,14 +1444,10 @@ function CompetitionPageContent() {
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <div className="flex justify-between items-center gap-3">
                   <h2 className="text-xl font-bold">Recent results</h2>
-                  <button
-                    onClick={() => setActiveTab('fixtures')}
-                    className="text-blue-400 text-sm hover:underline"
-                  >
+                  <button onClick={() => setActiveTab('fixtures')} className="text-blue-400 text-sm hover:underline">
                     View all
                   </button>
                 </div>
-
                 {completedFixtures.length === 0 ? (
                   <p className="text-gray-400 mt-5">No completed matches yet.</p>
                 ) : (
@@ -1429,14 +1475,10 @@ function CompetitionPageContent() {
             <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
               <div className="flex justify-between items-center gap-3">
                 <h2 className="text-xl font-bold">League standings</h2>
-                <button
-                  onClick={() => setActiveTab('standings')}
-                  className="text-blue-400 text-sm hover:underline"
-                >
+                <button onClick={() => setActiveTab('standings')} className="text-blue-400 text-sm hover:underline">
                   Full table
                 </button>
               </div>
-
               {standings.length === 0 ? (
                 <p className="text-gray-400 mt-5">
                   Standings will appear once the competition table has been populated.
@@ -1480,7 +1522,6 @@ function CompetitionPageContent() {
             {/* TOP SCORERS */}
             <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
               <h2 className="text-xl font-bold">Top scorers</h2>
-
               {topScorers.length === 0 ? (
                 <p className="text-gray-400 mt-5">
                   Player statistics will appear once match statistics are recorded.
@@ -1488,20 +1529,13 @@ function CompetitionPageContent() {
               ) : (
                 <div className="space-y-3 mt-5">
                   {topScorers.map((player, index) => (
-                    <div
-                      key={player.player_id}
-                      className="bg-gray-800 rounded-lg p-4 flex items-center justify-between gap-4"
-                    >
+                    <div key={player.player_id} className="bg-gray-800 rounded-lg p-4 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-4">
                         <span className="text-gray-400 font-bold">#{index + 1}</span>
                         <div>
-                          <p className="font-semibold">
-                            {player.username || player.gamertag || 'Player'}
-                          </p>
+                          <p className="font-semibold">{player.username || player.gamertag || 'Player'}</p>
                           <p className="text-gray-400 text-xs">{player.team_name || 'Club'}</p>
-                          <p className="text-gray-500 text-xs">
-                            {player.appearances} appearances
-                          </p>
+                          <p className="text-gray-500 text-xs">{player.appearances} appearances</p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -1519,15 +1553,11 @@ function CompetitionPageContent() {
               <section className="mt-8 bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <div className="flex flex-wrap justify-between items-center gap-3">
                   <h2 className="text-2xl font-bold">Competition rosters</h2>
-                  <span className="text-sm text-gray-400">
-                    {registrations.length} registered players
-                  </span>
+                  <span className="text-sm text-gray-400">{registrations.length} registered players</span>
                 </div>
 
                 {registrations.length === 0 ? (
-                  <p className="text-gray-400 mt-4">
-                    No player registrations are visible yet.
-                  </p>
+                  <p className="text-gray-400 mt-4">No player registrations are visible yet.</p>
                 ) : (
                   <div className="space-y-6 mt-5">
                     {registeredTeams.map(team => {
@@ -1549,19 +1579,13 @@ function CompetitionPageContent() {
                           ) : (
                             <div className="space-y-2">
                               {teamRegistrations.map(registration => (
-                                <div
-                                  key={registration.id}
-                                  className="bg-gray-900 border border-gray-700 rounded-lg p-3 flex flex-wrap justify-between items-center gap-3"
-                                >
+                                <div key={registration.id} className="bg-gray-900 border border-gray-700 rounded-lg p-3 flex flex-wrap justify-between items-center gap-3">
                                   <div>
-                                    <p className="font-semibold">
-                                      {playerName(registration.player_id)}
-                                    </p>
+                                    <p className="font-semibold">{playerName(registration.player_id)}</p>
                                     <p className="text-xs text-gray-500">
                                       {profiles.find(profile => profile.id === registration.player_id)?.position || 'Position not set'}
                                     </p>
                                   </div>
-
                                   {isAdmin && (
                                     <button
                                       onClick={() => removePlayer(registration.id)}
@@ -1585,17 +1609,14 @@ function CompetitionPageContent() {
           </>
         )}
 
-        {/* FIXTURES AND RESULTS */}
+        {/* FIXTURES */}
         {activeTab === 'fixtures' && (
           <section className="mt-8">
             <div className="flex flex-wrap justify-between items-center gap-4">
               <div>
                 <h2 className="text-3xl font-black">Fixtures & Results</h2>
-                <p className="text-gray-400 mt-2">
-                  Every scheduled match and recorded result.
-                </p>
+                <p className="text-gray-400 mt-2">Every scheduled match and recorded result.</p>
               </div>
-
               <div className="flex gap-2">
                 <span className="bg-gray-900 border border-gray-800 px-3 py-2 rounded-lg text-sm">
                   {fixtures.length} matches
@@ -1616,9 +1637,7 @@ function CompetitionPageContent() {
                   key={filter.id}
                   onClick={() => setFixtureFilter(filter.id)}
                   className={`px-4 py-2 rounded-lg text-sm font-semibold ${
-                    fixtureFilter === filter.id
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-900 text-gray-400 hover:text-white'
+                    fixtureFilter === filter.id ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-white'
                   }`}
                 >
                   {filter.label}
@@ -1629,9 +1648,7 @@ function CompetitionPageContent() {
             {filteredFixtures.length === 0 ? (
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center mt-6">
                 <h3 className="text-xl font-bold">No fixtures found</h3>
-                <p className="text-gray-400 mt-2">
-                  Fixtures will appear here once they have been scheduled.
-                </p>
+                <p className="text-gray-400 mt-2">Fixtures will appear here once scheduled.</p>
               </div>
             ) : (
               <div className="space-y-4 mt-6">
@@ -1640,23 +1657,10 @@ function CompetitionPageContent() {
                   const awayBadge = teamBadge(fixture.away_team_id)
 
                   return (
-                    <article
-                      key={fixture.id}
-                      className="bg-gray-900 border border-gray-800 rounded-xl p-5 md:p-6"
-                    >
+                    <article key={fixture.id} className="bg-gray-900 border border-gray-800 rounded-xl p-5 md:p-6">
                       <div className="flex flex-wrap justify-between gap-3 text-xs text-gray-400 mb-5">
-                        <span>
-                          {fixture.matchweek
-                            ? `MATCHWEEK ${fixture.matchweek}`
-                            : 'COMPETITION FIXTURE'}
-                        </span>
-                        <span
-                          className={
-                            isCompleted(fixture)
-                              ? 'text-green-400'
-                              : 'text-blue-400'
-                          }
-                        >
+                        <span>{fixture.matchweek ? `MATCHWEEK ${fixture.matchweek}` : 'COMPETITION FIXTURE'}</span>
+                        <span className={isCompleted(fixture) ? 'text-green-400' : 'text-blue-400'}>
                           {fixtureStatus(fixture)}
                         </span>
                       </div>
@@ -1717,11 +1721,8 @@ function CompetitionPageContent() {
             <div className="flex flex-wrap justify-between items-center gap-4">
               <div>
                 <h2 className="text-3xl font-black">League standings</h2>
-                <p className="text-gray-400 mt-2">
-                  Current competition table and club performance.
-                </p>
+                <p className="text-gray-400 mt-2">Current competition table and club performance.</p>
               </div>
-
               <span className="bg-gray-900 border border-gray-800 px-4 py-2 rounded-lg text-sm">
                 {standings.length} clubs
               </span>
@@ -1730,30 +1731,20 @@ function CompetitionPageContent() {
             {standings.length === 0 ? (
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center mt-6">
                 <h3 className="text-xl font-bold">No standings available</h3>
-                <p className="text-gray-400 mt-2">
-                  The table will appear once match results have been recorded.
-                </p>
+                <p className="text-gray-400 mt-2">The table will appear once match results have been recorded.</p>
               </div>
             ) : (
               <>
                 <div className="flex gap-2 mt-6">
                   <button
                     onClick={() => setStandingsView('table')}
-                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${
-                      standingsView === 'table'
-                        ? 'bg-blue-600'
-                        : 'bg-gray-900 text-gray-400'
-                    }`}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${standingsView === 'table' ? 'bg-blue-600' : 'bg-gray-900 text-gray-400'}`}
                   >
                     Full table
                   </button>
                   <button
                     onClick={() => setStandingsView('form')}
-                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${
-                      standingsView === 'form'
-                        ? 'bg-blue-600'
-                        : 'bg-gray-900 text-gray-400'
-                    }`}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold ${standingsView === 'form' ? 'bg-blue-600' : 'bg-gray-900 text-gray-400'}`}
                   >
                     Club records
                   </button>
@@ -1778,16 +1769,9 @@ function CompetitionPageContent() {
                       </thead>
                       <tbody>
                         {standings.map((standing, index) => (
-                          <tr
-                            key={standing.team_id}
-                            className="border-b border-gray-800 hover:bg-gray-800/50"
-                          >
-                            <td className="py-4 px-4 font-bold text-gray-400">
-                              {index + 1}
-                            </td>
-                            <td className="py-4 px-4 font-semibold">
-                              {standing.team_name}
-                            </td>
+                          <tr key={standing.team_id} className="border-b border-gray-800 hover:bg-gray-800/50">
+                            <td className="py-4 px-4 font-bold text-gray-400">{index + 1}</td>
+                            <td className="py-4 px-4 font-semibold">{standing.team_name}</td>
                             <td className="py-4 px-3">{standing.played}</td>
                             <td className="py-4 px-3">{standing.wins}</td>
                             <td className="py-4 px-3">{standing.draws}</td>
@@ -1795,20 +1779,11 @@ function CompetitionPageContent() {
                             <td className="py-4 px-3">{standing.goals_for}</td>
                             <td className="py-4 px-3">{standing.goals_against}</td>
                             <td className="py-4 px-3">
-                              <span className={
-                                standing.goal_difference > 0
-                                  ? 'text-green-400'
-                                  : standing.goal_difference < 0
-                                    ? 'text-red-400'
-                                    : 'text-gray-400'
-                              }>
-                                {standing.goal_difference > 0 ? '+' : ''}
-                                {standing.goal_difference}
+                              <span className={standing.goal_difference > 0 ? 'text-green-400' : standing.goal_difference < 0 ? 'text-red-400' : 'text-gray-400'}>
+                                {standing.goal_difference > 0 ? '+' : ''}{standing.goal_difference}
                               </span>
                             </td>
-                            <td className="py-4 px-4 font-black text-blue-400 text-base">
-                              {standing.points}
-                            </td>
+                            <td className="py-4 px-4 font-black text-blue-400 text-base">{standing.points}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1817,17 +1792,10 @@ function CompetitionPageContent() {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
                     {standings.map((standing, index) => (
-                      <div
-                        key={standing.team_id}
-                        className="bg-gray-900 border border-gray-800 rounded-xl p-5"
-                      >
+                      <div key={standing.team_id} className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                         <div className="flex justify-between items-center gap-3">
-                          <h3 className="font-bold">
-                            {index + 1}. {standing.team_name}
-                          </h3>
-                          <span className="text-blue-400 font-black">
-                            {standing.points} pts
-                          </span>
+                          <h3 className="font-bold">{index + 1}. {standing.team_name}</h3>
+                          <span className="text-blue-400 font-black">{standing.points} pts</span>
                         </div>
                         <div className="grid grid-cols-4 gap-2 mt-5 text-center">
                           <div className="bg-gray-800 rounded-lg p-3">
